@@ -9,7 +9,7 @@ import (
 // StartSampler starts sampler as Runnable goroutine, with samplingDetails, and returns function that stops the sampler
 //
 // The caller is responsible for closing sampleChan
-func StartSampler(samplingDetails *SamplingParams, sampleChan *chan int, closeChannelFn func() bool, logger *Logger) (stopFn func()) {
+func StartSampler(samplingDetails *SamplingParams, sampleChan *chan int, closeChannelFn func(), logger *Logger) (stopFn func()) {
 	samplerHandle := NewRunnable("sampler", logger)
 	stopFn = samplerHandle.Stop
 	go sampler(samplerHandle, samplingDetails, sampleChan, closeChannelFn)
@@ -19,7 +19,7 @@ func StartSampler(samplingDetails *SamplingParams, sampleChan *chan int, closeCh
 // sampler reads the sensor with readSampleFromSensor and writes samples to sampleChan;
 // it reads sampling details (start, period, sampleCount, maxSampleValue) from samplingDetails;
 // it first resets the sensor at *start* time, then it samples the sensor every *period* seconds, *sampleCount* times
-func sampler(r *Runnable, samplingDetails *SamplingParams, sampleChan *chan int, closeChannelFn func() bool) {
+func sampler(r *Runnable, samplingDetails *SamplingParams, sampleChan *chan int, closeChannelFn func()) {
 
 	start := time.Unix(int64(samplingDetails.Start), 0)
 	period := time.Duration(samplingDetails.SamplingPeriod) * time.Second
@@ -60,12 +60,7 @@ func sampler(r *Runnable, samplingDetails *SamplingParams, sampleChan *chan int,
 
 		case <-r.ExitChan:
 			r.Close()
-			closedBySampler := closeChannelFn()
-			if closedBySampler {
-				r.Logger.Info("sampler done, closing sampling chan")
-			} else {
-				r.Logger.Info("sampler done, sampling chan already closed")
-			}
+			closeChannelFn()
 			return
 		}
 	}

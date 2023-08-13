@@ -37,9 +37,6 @@ func main() {
 	}
 
 	sensor := InitSensor()
-
-	StartTaskDaemon(sensor.GetTaskChannel(), StartTaskWorker, GetLoggerForFile("TaskDaemon", "sensor"))
-
-	sensor.HttpServer = InitHttpServer("sensor", ip, sensor.GetEndpoints())
-	sensor.RunHttpServer()
+	sensor.StartTaskDaemon(StartTaskWorker)
+	sensor.RunHttpServer(ip)
 }

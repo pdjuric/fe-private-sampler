@@ -5,7 +5,6 @@ import (
 	. "fe/internal/common"
 	"fmt"
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"net/http"
 )
 
@@ -30,10 +29,11 @@ func (sensor *Sensor) submitTaskEndpoint(c *gin.Context) {
 	task := sensor.NewTask(&taskRequest)
 
 	sensor.AddTask(task)
+	sensor.SendTaskToDaemon(task)
 
-	msg := fmt.Sprintf("task %s added successfully", task.Uuid)
+	msg := fmt.Sprintf("task %s added successfully", task.Id)
 	sensor.HttpLogger.Info(msg)
-	c.String(http.StatusOK, msg)
+	c.String(http.StatusAccepted, msg)
 }
 
 func (sensor *Sensor) setServerEndpoint(c *gin.Context) {
@@ -69,7 +69,7 @@ func (sensor *Sensor) setServerEndpoint(c *gin.Context) {
 
 func (sensor *Sensor) setGroupEndpoint(c *gin.Context) {
 	var data struct {
-		GroupId uuid.UUID `json:"id"`
+		GroupId UUID `json:"id"`
 	}
 
 	if err := c.BindJSON(&data); err != nil {
@@ -78,20 +78,20 @@ func (sensor *Sensor) setGroupEndpoint(c *gin.Context) {
 		return
 	}
 
-	// assert that Sensor doesn't already have Group
-	if sensor.Group == nil {
-		sensor.Group = &data.GroupId
+	// assert that Sensor doesn't already have GroupId
+	if sensor.GroupId.IsNil() {
+		sensor.GroupId = data.GroupId
 		msg := fmt.Sprintf("group %s set successfully", data.GroupId)
 		sensor.HttpLogger.Info(msg)
 		c.String(http.StatusOK, msg)
 
-	} else if sensor.Group.String() == data.GroupId.String() {
-		msg := fmt.Sprintf("group %s is already set", sensor.Group)
+	} else if sensor.GroupId == data.GroupId {
+		msg := fmt.Sprintf("group %s is already set", sensor.GroupId)
 		sensor.HttpLogger.Info(msg)
 		c.String(http.StatusOK, msg)
 
 	} else {
-		err := fmt.Errorf("could not set group %s, as group %s is already set", data.GroupId, sensor.Group)
+		err := fmt.Errorf("could not set group %s, as group %s is already set", data.GroupId, sensor.GroupId)
 		sensor.HttpLogger.Err(err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err})
 	}
@@ -106,8 +106,8 @@ func (sensor *Sensor) registerSensorEndpoint(c *gin.Context) {
 		return
 	}
 
-	// assert that the Group is already set
-	if sensor.Group == nil {
+	// assert that the GroupId is already set
+	if sensor.GroupId.IsNil() {
 		err := fmt.Errorf("group must be set before sensor registration")
 		sensor.HttpLogger.Err(err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err})

@@ -1,34 +1,34 @@
 package common
 
 import (
-	"github.com/google/uuid"
+	"fmt"
+	_uuid "github.com/google/uuid"
 	"net"
 )
 
 // todo optional and required parameters in all requests
 
 type RegisterSensorRequest struct {
-	SensorId string `json:"sensorId"`
+	SensorId UUID `json:"sensorId"`
 	IP
 }
 
-// todo for now, this is avoideede altogether, but needs to be used for Multi
-type SubmitBatchRequest struct {
-	TaskId uuid.UUID `json:"id"` // todo may be removed, it's send through query param
-	// todo  sensor id hashed with task id !!!
-	BatchIdx int `json:"batchIdx"`
-	// todo add FE cipher
+type SubmitCipherRequest struct {
+	//TaskId   UUID 		`json:"taskId"` // sent through path param
+	SensorId UUID     `json:"sensorId"`
+	BatchIdx int      `json:"batchIdx"`
+	Cipher   FECipher `json:"cipher"`
 }
 
 type CreateTaskRequest struct {
-	GroupId   uuid.UUID `json:"groupId"`
-	BatchSize int       `json:"batchSize"` // no need for BatchParams, it can be derived
+	GroupId   UUID `json:"groupId"`
+	BatchSize int  `json:"batchSize"` // no need for BatchParams, it can be derived
 	SamplingParams
 	CoefficientsByPeriod []int `json:"coefficientsByPeriod" default:"nil" required:"true"`
 }
 
 type SubmitTaskRequest struct {
-	TaskId uuid.UUID `json:"id"`
+	TaskId UUID `json:"id"`
 	BatchParams
 	SamplingParams
 
@@ -44,4 +44,28 @@ type IP struct {
 
 func (ip IP) String() string {
 	return ip.Schema + "://" + ip.IPv4.String() + ":" + ip.Port
+}
+
+type UUID string
+
+func (uuid UUID) Verify() bool {
+	_, err := _uuid.Parse(string(uuid))
+	return err == nil
+}
+
+func (uuid UUID) IsNil() bool {
+	return string(uuid) == ""
+}
+
+func NewUUID() UUID {
+	return UUID(_uuid.New().String())
+}
+
+func NewUUIDFromString(uuidString string) (UUID, error) {
+	uuid := UUID(uuidString)
+	if !uuid.Verify() {
+		return UUID(""), fmt.Errorf("invalid UUID: %s", uuidString)
+	} else {
+		return uuid, nil
+	}
 }

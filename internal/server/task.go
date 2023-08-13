@@ -4,18 +4,18 @@ import (
 	. "fe/internal/common"
 	"fmt"
 	"github.com/fentec-project/gofe/innerprod/fullysec"
-	"github.com/google/uuid"
 	"math/big"
+	"net/http"
 	"time"
 )
 
 type Task struct {
-	Uuid    uuid.UUID `json:"id"`
+	Id      UUID      `json:"id"`
 	Status  string    `json:"status"`
 	Sensors []*Sensor `json:"sensors" default:"nil"`
 
 	// creation parameters
-	Group uuid.UUID `json:"group"`
+	Group UUID `json:"group"`
 	SamplingParams
 	BatchParams // derived
 
@@ -28,14 +28,16 @@ type Task struct {
 	result        *big.Int
 
 	// times
-	SchemaGenerationTime       time.Duration `json:"-"`
 	MasterSecKeyGenerationTime time.Duration `json:"-"`
+
+	logger *Logger
 }
 
 // NewTaskFromTaskRequest creates a new Task from common.CreateTaskRequest
 func NewTaskFromTaskRequest(taskRequest CreateTaskRequest) *Task {
+	id := NewUUID()
 	return &Task{
-		Uuid:   uuid.New(),
+		Id:     id,
 		Status: "created",
 		Group:  taskRequest.GroupId,
 		BatchParams: BatchParams{
@@ -44,18 +46,19 @@ func NewTaskFromTaskRequest(taskRequest CreateTaskRequest) *Task {
 		},
 		SamplingParams:       taskRequest.SamplingParams,
 		CoefficientsByPeriod: taskRequest.CoefficientsByPeriod,
+		logger:               GetLoggerForFile("", string(id)),
 	}
 }
 
-// GetBounds calculates vector element bounds needed for FE schema generation
-func (t *Task) GetBounds() (*big.Int, *big.Int) {
+// getBounds calculates vector element bounds needed for FE schema generation
+func (t *Task) getBounds() (*big.Int, *big.Int) {
 	boundX := big.NewInt(int64(t.MaxSampleValue))
-	boundY := big.NewInt(int64(t.GetMaxCoefficientValue()))
+	boundY := big.NewInt(int64(t.getMaxCoefficientValue()))
 	return boundX, boundY
 }
 
-// GetMaxCoefficientValue returns the maximum value of coefficients; used for FH(Multi)IPE scheme, for boundY
-func (t *Task) GetMaxCoefficientValue() int {
+// getMaxCoefficientValue returns the maximum value of coefficients; used for FH(Multi)IPE scheme, for boundY
+func (t *Task) getMaxCoefficientValue() int {
 	maxCoefficientValue := t.CoefficientsByPeriod[0]
 	for _, coefficient := range t.CoefficientsByPeriod {
 		if coefficient > maxCoefficientValue {
@@ -73,24 +76,24 @@ func (t *Task) SetSensors(g *Group) error {
 	// check if there are any sensors at all
 	if len(g.Sensors) == 0 {
 		err := fmt.Errorf("no sensors in group %s; tasks can be created for groups with at least one server", g.Uuid)
-		logger.Err(err)
+		t.logger.Err(err)
 		return err
 	}
 
-	logger.Info("setting sensors for task %s", t.Uuid)
+	t.logger.Info("setting sensors for task %s", t.Id)
 	t.Sensors = make([]*Sensor, len(g.Sensors))
 	copy(t.Sensors, g.Sensors)
 
 	if t.BatchSize == t.SampleCount {
 		// opt 1: sending all samples at once, vectorLen = sampleCnt, vectors = sensorCnt
 
-		logger.Info("sending all samples at once")
+		t.logger.Info("sending all samples at once")
 		t.BatchSize = t.SampleCount
 		t.BatchCnt = len(t.Sensors)
 	} else {
 		// opt 2: sending samples in batches, vectorLen = SamplesPerSubmission, vectors = sensorCnt * submissionCnt
 
-		logger.Info("sending samples in batches")
+		t.logger.Info("sending samples in batches")
 		//fixme zakomentarisano t.BatchSize = &t.SamplesPerSubmission
 		t.BatchCnt = len(t.Sensors) * t.SampleCount / t.BatchSize
 	}
@@ -99,126 +102,117 @@ func (t *Task) SetSensors(g *Group) error {
 	return nil
 }
 
-func (t *Task) SetFEParams() error {
-	// todo handle error
+func (t *Task) SetFEParams() bool {
 	if t.BatchCnt == 1 {
-		_ = t.setSingleFEParams()
+		return t.setSingleFEParams()
 	} else {
-		_ = t.setMultiFEParams()
+		return t.setMultiFEParams()
 	}
-	return nil
 }
 
 // setSingleFEParams creates SingleFEParams for the Task - instantiates fullysec.FHIPE schema and generates master keys
-func (t *Task) setSingleFEParams() error {
-	var start, end time.Time
-
+func (t *Task) setSingleFEParams() bool {
 	feParams := new(SingleFEParams)
 	t.FEParams = feParams
 
-	boundX, boundY := t.GetBounds()
+	boundX, boundY := t.getBounds()
 	vectorLen := t.BatchSize
 
-	// generate FHIPE schema + measure time
-	start = time.Now()
+	// generate FHIPE schema
 	schema, err := fullysec.NewFHIPE(vectorLen, boundX, boundY)
-	end = time.Now()
 	if err != nil {
-		logger.Err(err)
-		logger.Info("vector length: %d, max sample value: %d, max coefficient value: %d", vectorLen, t.MaxSampleValue, t.GetMaxCoefficientValue())
-		return fmt.Errorf("failed to generate FHIPE schema")
+		t.logger.Err(err)
+		t.logger.Info("vector length: %d, max sample value: %d, max coefficient value: %d", vectorLen, t.MaxSampleValue, t.getMaxCoefficientValue())
+		// fmt.Errorf("failed to generate FHIPE schema")
+		return false
 	}
 
-	t.SchemaGenerationTime = end.Sub(start)
 	feParams.Params = schema.Params
 
 	// generate master key + measure time
-	start = time.Now()
-	msk, err := schema.GenerateMasterKey()
-	end = time.Now()
+	start := time.Now()
+	feParams.SecKey, err = schema.GenerateMasterKey()
+	t.MasterSecKeyGenerationTime = time.Since(start)
 	if err != nil {
-		logger.Error("error during master secret key generation: %s", err)
-		return fmt.Errorf("error during master secret key generation")
+		t.logger.Error("error during master secret key generation: %s", err)
+		// fmt.Errorf("error during master secret key generation")
+		return false
 	}
 
-	t.MasterSecKeyGenerationTime = end.Sub(start)
-	feParams.SecKey = msk
-
-	return nil
+	return true
 }
 
 // setMultiFEParams creates MultiFEParams for the Task, instantiates fullysec.FHMultiIPE schema and generates master keys
-func (t *Task) setMultiFEParams() error {
-	var start, end time.Time
-
+func (t *Task) setMultiFEParams() bool {
 	feParams := new(MultiFEParams)
 	t.FEParams = feParams
 
-	boundX, boundY := t.GetBounds()
+	boundX, boundY := t.getBounds()
 	vectorLen := t.BatchSize
 	vectorCnt := t.BatchCnt
 
-	// generate FHIPE schema + measure time
-	start = time.Now()
+	// generate FHIPE schema
 	schema := fullysec.NewFHMultiIPE(FHMultiIPESecLevel, vectorCnt, vectorLen, boundX, boundY)
-	end = time.Now()
-
-	t.SchemaGenerationTime = end.Sub(start)
 	feParams.Params = schema.Params
-	feParams.BatchCnt = t.SampleCount / t.BatchSize
+	feParams.BatchesPerSensor = t.SampleCount / t.BatchSize
 	feParams.SensorCnt = len(t.Sensors)
 
 	// generate master key + measure time
-	start = time.Now()
+	start := time.Now()
 	msk, mpk, err := schema.GenerateKeys()
-	end = time.Now()
+	t.MasterSecKeyGenerationTime = time.Since(start)
 	if err != nil {
-		logger.Error("error during generating master secret and public key: %s", err)
-		return fmt.Errorf("error during generating master and public secret key")
+		t.logger.Error("error during generating master secret and public key: %s", err)
+		// fmt.Errorf("error during generating master and public secret key")
+		return false
 	}
 
-	t.MasterSecKeyGenerationTime = end.Sub(start)
 	feParams.PubKey = mpk
 	feParams.SecKey = msk
 
-	return nil
+	return true
 }
 
-// NewSubmitTaskRequest creates a new common.SubmitTaskRequest from Task, which will be submitted to the server
-func NewSubmitTaskRequest(t *Task, sensorIdx int) (*SubmitTaskRequest, error) {
-	feEncryptionParams, err := t.GetEncryptionParams(sensorIdx)
-	if err != nil {
-		// todo add task rollback
-		return nil, err
-	}
-
-	return &SubmitTaskRequest{
-		TaskId:             t.Uuid,
-		BatchParams:        t.BatchParams,
-		SamplingParams:     t.SamplingParams,
-		Schema:             t.GetSchemaName(),
-		FEEncryptionParams: feEncryptionParams,
-	}, nil
-}
-
-// Submit sends the SubmitTaskRequest and FEEncryptionParams to all Sensors in the Task's Group (captured during SetSensors)
-func (t *Task) Submit() (e error) {
-	e = fmt.Errorf("the task could not be submitted")
+// Submit sends the SubmitTaskRequest to all Sensors in the Task's Group (captured during SetSensors)
+func (t *Task) Submit() bool {
 	// todo add parallel execution
 	for idx, sensor := range t.Sensors {
-
-		submitTaskRequest, e := NewSubmitTaskRequest(t, idx)
-		if e != nil {
-			return e
+		t.logger.Info("submitting task to sensor %s", sensor.Id)
+		feEncryptionParams, err := t.GetEncryptionParams(idx)
+		if err != nil {
+			t.logger.Err(err) // todo add task rollback ????
+			t.logger.Error("submission to sensor %s failed", sensor.Id)
+			return false
 		}
 
-		statusCode, responseBody, e := sensor.SubmitTask(submitTaskRequest)
-		if e != nil {
-			return e
+		statusCode, _, err := sensor.SubmitTask(t.Id, t.BatchParams, t.SamplingParams, t.GetSchemaName(), feEncryptionParams)
+		if err != nil {
+			t.logger.Err(err)
+			t.logger.Error("submission to sensor %s failed", sensor.Id)
+			return false
 		}
 
-		logger.Info("status code: %d, response body: %s", statusCode, responseBody)
+		if statusCode != http.StatusAccepted {
+			t.logger.Error("submission to sensor %s failed", sensor.Id)
+			return false
+		}
+
+		t.logger.Info("task submitted to sensor %s", sensor.Id)
 		// todo check whether start time has already passed
 	}
-	return nil
+	return true
+}
+
+func (t *Task) DeriveDecryptionKey() bool {
+	t.logger.Info("deriving decryption key")
+	decryptionKey, err := t.GetDecryptionKey(t.CoefficientsByPeriod)
+	if err != nil {
+		t.logger.Err(err)
+		t.logger.Info("error during deriving decryption key")
+		return false
+	}
+
+	t.logger.Info("decryption key derived successfully")
+	t.decryptionKey = decryptionKey
+	return true
 }

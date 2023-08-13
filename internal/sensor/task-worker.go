@@ -53,7 +53,7 @@ func taskWorker(r *Runnable, task *Task) {
 			// no need to do this in goroutine, TaskWorker will be able to keep up with all the incoming samples
 			task.AddSample(sample)
 
-		case batch, notEnd := <-encryptionChan:
+		case idx, notEnd := <-encryptionChan:
 			if !notEnd {
 				// done, all batches collected
 				encryptionChan = nil
@@ -64,28 +64,22 @@ func taskWorker(r *Runnable, task *Task) {
 
 			// do this in goroutine, as it could take up much time
 			// in logger, it will still be displayed as TaskWorker
-			// no ned for Runnable as it will not be waiting on channels in a loop
-			// do not use batch in the anonymous function, as it can be replaced ????
-			// todo is this true?
-			go func(b *Batch) {
-				// encrypt the batch, and send it to server
-				r.Logger.Info("encrypting batch no %d", b.idx)
-				batchIdx, err := task.EncryptBatch(b)
-				if err != nil {
-					r.Fail(err) //todo replace
-					return
-				}
-
-				cipher, err := task.GetCipher(batchIdx)
-				if err != nil {
-					r.Fail(err) //todo replace
-					return
+			// no need for Runnable as it will not be waiting on channels in a loop
+			go func(batchIdx int) {
+				// encrypt the batch
+				ok := task.EncryptBatch(batchIdx)
+				if !ok {
+					r.Logger.Info("could not encrypt batch no %d of task %s; aborting...", batchIdx, task.Id)
 				}
 
 				// either gets a token for submitting a cipher, or gets cancelled
 				select {
 				case <-rateLimiter:
-					task.server.SubmitBatch(task.Uuid, cipher)
+					// send the cipher to the server
+					task.SubmitCipher(batchIdx)
+					if !ok {
+						r.Logger.Info("could not submit cipher no %d of task %s; aborting...", batchIdx, task.Id)
+					}
 
 					// if the submission is not cancelled, return the token
 					// if it is, do not return it, so that other goroutines don't start submitting (using this token)
@@ -97,7 +91,7 @@ func taskWorker(r *Runnable, task *Task) {
 					cancelSubmission <- true
 				}
 
-			}(batch)
+			}(idx)
 
 		case <-r.ExitChan:
 			//todo drain chans ?

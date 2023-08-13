@@ -12,25 +12,27 @@ type Endpoint struct {
 
 // todo what if machine is not online ????
 type HttpServer struct {
-	IP
+	*IP
 	HttpLogger *Logger
 	endpoints  []Endpoint
 }
 
-func InitHttpServer(logFilename string, ip IP, endpoints []Endpoint) *HttpServer {
+func InitHttpServer(logger *Logger, endpoints []Endpoint) *HttpServer {
 	return &HttpServer{
-		IP:         ip,
-		HttpLogger: GetLoggerForFile("http server", logFilename),
+		IP:         nil,
+		HttpLogger: GetLogger("http server", logger),
 		endpoints:  endpoints,
 	}
 }
 
 // RunHttpServer ; prior to call of this function, SetEndpoints must be called
-func (host *HttpServer) RunHttpServer() {
+func (host *HttpServer) RunHttpServer(ip IP) {
 	if host.endpoints == nil {
 		host.HttpLogger.Error("endpoints not set")
+		return
 	}
 
+	host.IP = &ip
 	router := gin.Default()
 
 	addLogging := func(fnToCall func(c *gin.Context)) func(c *gin.Context) {
@@ -49,7 +51,6 @@ func (host *HttpServer) RunHttpServer() {
 		}
 	}
 
-	//todo should here be localhost?
 	err := router.Run(host.IPv4.String() + ":" + host.Port)
 	if err != nil {
 		host.HttpLogger.Err(err)

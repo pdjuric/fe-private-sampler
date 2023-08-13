@@ -4,11 +4,13 @@ go 1.20
 
 require (
 	github.com/fentec-project/bn256 v0.0.0-20190726093940-0d0fc8bfeed0
-	github.com/fentec-project/gofe v0.0.0-20220829150550-ccc7482d20ef
+	github.com/fentec-project/gofe v0.0.0-20201116104937-375013c0b0a5
 	github.com/gin-gonic/gin v1.9.1
 	github.com/google/uuid v1.3.0
 	github.com/sirupsen/logrus v1.9.3
 )
+
+replace github.com/fentec-project/gofe => github.com/pdjuric/gofe v0.0.0-20230812110950-375013c72423
 
 require (
 	github.com/bytedance/sonic v1.9.1 // indirect

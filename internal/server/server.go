@@ -3,29 +3,25 @@ package server
 import (
 	. "fe/internal/common"
 	"fmt"
-	"github.com/google/uuid"
 	"sync"
 )
 
 type Server struct {
-	groups          sync.Map // map[uuid.UUID]*Group
-	sensors         sync.Map //map[uuid.UUID]*Sensor
-	taskDaemonQueue chan *Task
+	groups  sync.Map
+	sensors sync.Map
+	tasks   sync.Map
 
-	tasks sync.Map //map[uuid.UUID]*Sensor
-	*HttpServer
+	*Host[Task]
 }
-
-var logger *Logger // todo this logger should be removed, along with SetLogger
 
 func InitServer() *Server {
-	return &Server{
-		taskDaemonQueue: make(chan *Task, 15),
-	}
+	server := &Server{}
+	server.Host = InitHost[Task](ServerLogDir, ServerLogFilename, ServerTaskDaemonChanSize, server.GetEndpoints())
+	return server
 }
 
-func (s *Server) GetGroup(uuid uuid.UUID) (*Group, error) {
-	group, exists := s.groups.Load(uuid)
+func (server *Server) GetGroup(uuid UUID) (*Group, error) {
+	group, exists := server.groups.Load(uuid)
 	if !exists {
 		return nil, fmt.Errorf("group with id %s not found", uuid)
 	}
@@ -33,24 +29,15 @@ func (s *Server) GetGroup(uuid uuid.UUID) (*Group, error) {
 	return group.(*Group), nil
 }
 
-func (s *Server) AddSensorToGroup(uuid uuid.UUID, ip IP, group *Group) {
-	sensor, exists := s.sensors.Load(uuid)
+func (server *Server) AddSensorToGroup(uuid UUID, ip IP, group *Group) {
+	sensor, exists := server.sensors.Load(uuid)
 	if !exists {
-		sensor = s.NewSensor(uuid, ip)
+		sensor = server.NewSensor(uuid, ip)
 	}
 
 	group.AddSensor(sensor.(*Sensor))
 }
 
-func (s *Server) AddTask(task *Task) {
-	s.tasks.Store(task.Uuid.String(), task) // fixme task.Uuid didn't work !
-	s.taskDaemonQueue <- task
-}
-
-func (s *Server) GetTaskChannel() *chan *Task {
-	return &s.taskDaemonQueue
-}
-
-func SetLogger(newLogger *Logger) {
-	logger = newLogger
+func (server *Server) AddTask(task *Task) {
+	server.tasks.Store(task.Id, task)
 }

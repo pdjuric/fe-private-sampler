@@ -30,16 +30,17 @@ type SingleFEEncryptionParams struct {
 }
 
 type MultiFEEncryptionParams struct {
-	SecKeys []data.Matrix              `json:"secKeys"`
-	Params  *fullysec.FHMultiIPEParams `json:"params"`
+	SecKeys []data.Matrix             `json:"secKeys"`
+	Params  fullysec.FHMultiIPEParams `json:"params"`
 }
 
 //endregion
 
 //region Cipher
 
-type SingleFECipher = *fullysec.FHIPECipher
-type MultiFECipher = *data.VectorG1
+type FECipher = any
+type SingleFECipher = fullysec.FHIPECipher
+type MultiFECipher = data.VectorG1
 
 //endregion
 

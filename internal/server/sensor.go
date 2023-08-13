@@ -2,25 +2,24 @@ package server
 
 import (
 	. "fe/internal/common"
-	"github.com/google/uuid"
 )
 
 type Sensor struct {
-	Uuid   uuid.UUID `json:"id"`
-	Groups []*Group  `json:"groups"`
+	Id     UUID     `json:"id"`
+	Groups []*Group `json:"groups"`
 	*RemoteHttpServer
 }
 
-func (s *Server) NewSensor(uuid uuid.UUID, ip IP) *Sensor {
+func (server *Server) NewSensor(uuid UUID, ip IP) *Sensor {
 	sensor := &Sensor{
-		Uuid:   uuid,
+		Id:     uuid,
 		Groups: make([]*Group, 0),
 		RemoteHttpServer: &RemoteHttpServer{
 			IP:     ip,
-			Logger: GetLogger("http client", s.HttpLogger),
+			Logger: GetLogger("http client", server.HttpLogger),
 		},
 	}
-	s.sensors.Store(uuid, sensor)
+	server.sensors.Store(uuid, sensor)
 	return sensor
 }
 
@@ -40,10 +39,16 @@ func (s *Sensor) RemoveFromGroup(g *Group) {
 	}
 }
 
-func (s *Sensor) SubmitTask(taskRequest *SubmitTaskRequest) (statusCode int, responseBody []byte, e error) {
+func (s *Sensor) SubmitTask(taskId UUID, batchParams BatchParams, samplingParams SamplingParams, schema string, encryptionParams FEEncryptionParams) (statusCode int, responseBody []byte, e error) {
 	//method := "POST"
 	url := "/task"
+	body := SubmitTaskRequest{
+		TaskId:             taskId,
+		BatchParams:        batchParams,
+		SamplingParams:     samplingParams,
+		Schema:             schema,
+		FEEncryptionParams: encryptionParams,
+	}
 
-	return s.POST(url, taskRequest)
-
+	return s.POST(url, body)
 }

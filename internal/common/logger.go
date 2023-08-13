@@ -1,7 +1,6 @@
 package common
 
 import (
-	"fmt"
 	"github.com/sirupsen/logrus"
 	"io"
 	"os"
@@ -12,6 +11,23 @@ import (
 
 var loggerMap map[string]*logrus.Logger
 var loggerMapMutex sync.Mutex
+var loggingDir = ""
+
+// MUST BE CALLED BEFORE ANY LOGGING
+func InitLogger(dir string) error {
+	loggerMap = make(map[string]*logrus.Logger)
+
+	//err := os.Mkdir(dir, 0755)
+	//if err != nil {
+	//	return fmt.Errorf("error during creating log dir %s, using current working dir for logging...", dir)
+	//}
+
+	if dir[len(dir)-1] != '/' {
+		dir += "/"
+	}
+	loggingDir = dir
+	return nil
+}
 
 // logs dir must exist
 func GetLoggerForFile(prefix string, filename string) *Logger {
@@ -23,15 +39,9 @@ func GetLoggerForFile(prefix string, filename string) *Logger {
 
 	dumbLogger, exists := loggerMap[filename]
 	if !exists {
-		//err := os.Mkdir("	logs", 0755)
-		//if err != nil {
-		//	fmt.Errorf("error creating log dir: %s", err)
-		//	return nil
-		//}
-		logFile, err := os.Create("logs/" + filename + ".log")
+		logFile, err := os.Create(loggingDir + filename + ".log")
 		if err != nil {
-			fmt.Errorf("error creating log file: %s", err)
-			return nil
+			panic("error during creating log file")
 		}
 
 		dumbLogger = logrus.New()
@@ -41,11 +51,19 @@ func GetLoggerForFile(prefix string, filename string) *Logger {
 		//httpLogger.SetFormatter(&logFormatter{})
 		loggerMap[filename] = dumbLogger
 	}
-	return &Logger{" [" + prefix + "] ", dumbLogger}
+
+	if prefix != "" {
+		prefix = " [" + prefix + "] "
+	}
+
+	return &Logger{prefix, dumbLogger}
 }
 
 func GetLogger(prefix string, logger *Logger) *Logger {
-	return &Logger{" [" + prefix + "] ", logger.dumbLogger}
+	if prefix != "" {
+		prefix = " [" + prefix + "] "
+	}
+	return &Logger{prefix, logger.dumbLogger}
 }
 
 func GetDiscardLogger() *Logger {

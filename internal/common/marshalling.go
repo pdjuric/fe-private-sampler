@@ -6,7 +6,6 @@ import (
 	"github.com/fentec-project/bn256"
 	. "github.com/fentec-project/gofe/data"
 	"github.com/fentec-project/gofe/innerprod/fullysec"
-	"github.com/google/uuid"
 	"math/big"
 	"sync"
 )
@@ -93,8 +92,8 @@ func (p MultiFEEncryptionParams) MarshalJSON() ([]byte, error) {
 
 func (p *MultiFEEncryptionParams) UnmarshalJSON(data []byte) error {
 	var T struct {
-		SecKeys [][][][]byte               `json:"secKeys"`
-		Params  *fullysec.FHMultiIPEParams `json:"params"`
+		SecKeys [][][][]byte              `json:"secKeys"`
+		Params  fullysec.FHMultiIPEParams `json:"params"`
 	}
 
 	err := json.Unmarshal(data, &T)
@@ -174,31 +173,31 @@ func (p *SingleFEEncryptionParams) UnmarshalJSON(data []byte) error {
 func (r *SubmitTaskRequest) UnmarshalJSON(data []byte) error {
 
 	type submitTaskRequestT struct {
-		TaskId uuid.UUID `json:"id"`
+		TaskId UUID `json:"id"`
 		BatchParams
 		SamplingParams
 
 		Schema string
 	}
 
-	var taskRequest submitTaskRequestT
-	err := json.Unmarshal(data, &taskRequest)
+	var tempRequest submitTaskRequestT
+	err := json.Unmarshal(data, &tempRequest)
 	if err != nil {
 		return err
 	}
 
-	switch taskRequest.Schema {
+	switch tempRequest.Schema {
 	case SchemaFHIPE:
-		tempParamsStruct := struct {
+		tempParams := struct {
 			Params *SingleFEEncryptionParams `json:"FEEncryptionParams"`
 		}{&SingleFEEncryptionParams{}}
 
-		err = json.Unmarshal(data, &tempParamsStruct)
+		err = json.Unmarshal(data, &tempParams)
 		if err != nil {
 			return err
 		}
 
-		r.FEEncryptionParams = tempParamsStruct.Params
+		r.FEEncryptionParams = tempParams.Params
 
 	case SchemaFHMultiIPE:
 		tempParamsStruct := struct {
@@ -213,13 +212,65 @@ func (r *SubmitTaskRequest) UnmarshalJSON(data []byte) error {
 		r.FEEncryptionParams = tempParamsStruct.Params
 
 	default:
-		return fmt.Errorf("unknown schema %s", taskRequest.Schema)
+		return fmt.Errorf("unknown schema %s", tempRequest.Schema)
 	}
 
-	r.TaskId = taskRequest.TaskId
-	r.BatchParams = taskRequest.BatchParams
-	r.SamplingParams = taskRequest.SamplingParams
-	r.Schema = taskRequest.Schema
+	r.TaskId = tempRequest.TaskId
+	r.BatchParams = tempRequest.BatchParams
+	r.SamplingParams = tempRequest.SamplingParams
+	r.Schema = tempRequest.Schema
+	return nil
+}
+
+//endregion
+
+//region SubmitCipherRequest
+
+// not a function for interface ...
+func (r *SubmitCipherRequest) UnmarshalJSON(schema string, data []byte) error {
+
+	type submitCipherRequestT struct {
+		SensorId UUID `json:"sensorId"`
+		BatchIdx int  `json:"batchIdx"`
+	}
+
+	var tempRequest submitCipherRequestT
+	err := json.Unmarshal(data, &tempRequest)
+	if err != nil {
+		return err
+	}
+
+	switch schema {
+	case SchemaFHIPE:
+		tempCipher := struct {
+			Cipher *SingleFECipher `json:"cipher"`
+		}{}
+
+		err = json.Unmarshal(data, &tempCipher)
+		if err != nil {
+			return err
+		}
+
+		r.Cipher = tempCipher.Cipher
+
+	case SchemaFHMultiIPE:
+		tempCipherStruct := struct {
+			Params *MultiFECipher `json:"cipher"`
+		}{}
+
+		err = json.Unmarshal(data, &tempCipherStruct)
+		if err != nil {
+			return err
+		}
+
+		r.Cipher = tempCipherStruct
+
+	default:
+		return fmt.Errorf("unknown schema %s", schema)
+	}
+
+	r.SensorId = tempRequest.SensorId
+	r.BatchIdx = tempRequest.BatchIdx
 	return nil
 }
 

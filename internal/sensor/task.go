@@ -2,85 +2,34 @@ package sensor
 
 import (
 	. "fe/internal/common"
-	"fmt"
-	"github.com/google/uuid"
-	"math/big"
 	"sync"
 	"sync/atomic"
-	"time"
 )
 
-type Batch struct {
-	idx                int
-	samples            []*big.Int
-	receivedSamplesCnt int `default:"0"`
-
-	isSubmitted bool `default:"false"`
-
-	encryptionTime time.Duration
-}
-
-type sampledData struct {
-	batches []Batch
-
-	batchesSampledCnt   int
-	mutex               sync.Mutex // needed only if AddSample is called from multiple goroutines, for batchesSampledCnt sync
-	batchesSubmittedCnt int
-}
-
-func newSampledData(batchParams BatchParams) *sampledData {
-	batches := make([]Batch, batchParams.BatchCnt)
-	for idx := 0; idx < batchParams.BatchCnt; idx++ {
-		batches[idx] = Batch{
-			idx:     idx,
-			samples: make([]*big.Int, batchParams.BatchSize),
-		}
-	}
-
-	return &sampledData{
-		batches:             batches,
-		batchesSampledCnt:   0,
-		mutex:               sync.Mutex{},
-		batchesSubmittedCnt: 0,
-	}
-}
-
-func (t *Task) AddSample(sample int) {
-	t.mutex.Lock() // in case multiple goroutines call AddSample
-	defer t.mutex.Unlock()
-	currentBatchIdx := t.batchesSampledCnt
-
-	currentBatch := &t.batches[currentBatchIdx]
-	currentBatch.samples[currentBatch.receivedSamplesCnt] = big.NewInt(int64(sample))
-	fmt.Println(sample)
-	currentBatch.receivedSamplesCnt++
-	if currentBatch.receivedSamplesCnt == t.BatchSize {
-		t.batchesSampledCnt++
-		t.encryptionChan <- currentBatch
-		if t.batchesSampledCnt == t.BatchCnt {
-			t.CloseEncryptionChan() // this is the signal that there won't be any more batches
-		}
-	}
-}
-
 type Task struct {
-	Uuid   uuid.UUID `json:"id"`
-	stopFn func()    // stops TaskWorker execution when called
+	Id       UUID   `json:"id"`
+	SensorId UUID   `json:"sensorId"`
+	stopFn   func() // stops TaskWorker execution when called
+
 	BatchParams
+	batches []Batch
 
 	// sampling
 	SamplingParams
-	samplingChan       chan int
-	samplingChanClosed atomic.Bool
-	*sampledData
+	sampledBatchesCnt atomic.Int32 // atomic, if queried by another goroutine for task status
+	samplingChan      chan int
+	addingSampleMutex sync.Mutex // only in case of multiple goroutines calling AddSample
 
 	// encryption
-	FEEncryptor
-	encryptionChan       chan *Batch
+	schema string
+	FEEncryptionParams
+	encryptedBatchesCnt  atomic.Int32 // atomic, if queried by another goroutine for task status
+	encryptionChan       chan int
 	encryptionChanClosed atomic.Bool
 
 	// submission
-	server *Server
+	server              *Server
+	submittedBatchesCnt atomic.Int32
 
 	logger *Logger
 }
@@ -88,33 +37,87 @@ type Task struct {
 // NewTask creates a new Task from common.SubmitTaskRequest
 func (s *Sensor) NewTask(taskRequest *SubmitTaskRequest) *Task {
 	task := &Task{
-		Uuid:        taskRequest.TaskId, // todo use: type Uuid string instead of uuid.Uuid -> easier parsing
+		Id:       taskRequest.TaskId,
+		SensorId: s.Id,
+
 		BatchParams: taskRequest.BatchParams,
+		batches:     make([]Batch, taskRequest.BatchCnt),
 
 		SamplingParams: taskRequest.SamplingParams,
-		samplingChan:   make(chan int, taskRequest.BatchSize*2), // todo  ????
-		sampledData:    newSampledData(taskRequest.BatchParams),
+		samplingChan:   make(chan int, taskRequest.BatchSize*SensorSamplingChanSizeCoeff),
 
-		FEEncryptor:    NewFEEncryptor(taskRequest.Schema, taskRequest.FEEncryptionParams),
-		encryptionChan: make(chan *Batch, taskRequest.BatchCnt), // todo ???? (was /2 => rendez-vous occurred when BatchCnt = 1)
-		logger:         GetLoggerForFile("", taskRequest.TaskId.String()),
+		schema:             taskRequest.Schema,
+		FEEncryptionParams: taskRequest.FEEncryptionParams,
+		encryptionChan:     make(chan int, taskRequest.BatchCnt*SensorEncryptionChanSizeCoeff),
+		logger:             GetLoggerForFile("", string(taskRequest.TaskId)),
 
 		server: s.Server,
 	}
 
-	task.logger.Info("task created")
+	for idx := 0; idx < taskRequest.BatchCnt; idx++ {
+		task.batches[idx].InitBatch(idx, taskRequest.BatchSize)
+	}
 
+	task.logger.Info("task created")
 	return task
 }
 
-func (t *Task) CloseSamplingChan() bool {
-	alreadyClosed := t.samplingChanClosed.Swap(true)
-	if !alreadyClosed {
-		close(t.samplingChan)
+func (t *Task) AddSample(sample int) {
+	t.addingSampleMutex.Lock()
+	defer t.addingSampleMutex.Unlock()
+
+	currentBatchIdx := int(t.sampledBatchesCnt.Load())
+	currentBatch := &t.batches[currentBatchIdx]
+	currentBatchFull := currentBatch.AddSample(sample)
+
+	if currentBatchFull {
+		sampledBatchesCnt := int(t.sampledBatchesCnt.Add(1))
+		t.encryptionChan <- currentBatchIdx
+		if sampledBatchesCnt == t.BatchCnt {
+			t.CloseEncryptionChan() // this is the signal that there won't be any more batches
+		}
 	}
-	return !alreadyClosed
 }
 
+func (t *Task) EncryptBatch(batchIdx int) bool {
+	t.logger.Info("encrypting batch no %d", batchIdx)
+
+	err := t.batches[batchIdx].Encrypt(t.schema, t.FEEncryptionParams)
+	if err != nil {
+		t.logger.Err(err)
+		t.logger.Info("encryption of batch no %d failed", batchIdx)
+		return false
+	}
+	t.encryptedBatchesCnt.Add(1)
+
+	t.logger.Info("encryption of batch no %d successful", batchIdx)
+	return true
+}
+
+func (t *Task) SubmitCipher(batchIdx int) bool {
+
+	t.logger.Info("submitting cipher no %d", batchIdx)
+
+	batch := &t.batches[batchIdx]
+	err := t.server.SubmitCipher(t.Id, t.SensorId, batch.idx, batch.cipher)
+	if err != nil {
+		t.logger.Err(err)
+		t.logger.Info("submission of cipher no %d failed", batchIdx)
+		return false
+	}
+	t.submittedBatchesCnt.Add(1)
+
+	t.logger.Info("submission of cipher no %d successful", batchIdx)
+	return true
+}
+
+// CloseSamplingChan closes the samplingChan
+func (t *Task) CloseSamplingChan() {
+	close(t.samplingChan)
+}
+
+// CloseEncryptionChan closes the encryptionChan; as it can be called from AddSample or from TaskWorker,
+// it prevents closing the channel twice
 func (t *Task) CloseEncryptionChan() bool {
 	alreadyClosed := t.encryptionChanClosed.Swap(true)
 	if !alreadyClosed {

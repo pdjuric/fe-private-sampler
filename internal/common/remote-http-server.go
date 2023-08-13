@@ -13,17 +13,15 @@ type RemoteHttpServer struct {
 }
 
 // POST ; url should not include schema, ip address and port
-func (httpClient *RemoteHttpServer) POST(url string, body any) (statusCode int, responseBody []byte, e error) {
+func (httpClient *RemoteHttpServer) POST(url string, body any) (int, []byte, error) {
 	payload, _ := json.Marshal(body)
-	httpClient.Logger.Info("POST %s body: %v", httpClient.IP.String()+url, string(payload))
-
-	e = fmt.Errorf("http error")
+	httpClient.Logger.Info("POST %s body: %s", httpClient.IP.String()+url, string(payload))
 
 	// Create a request with the payload
 	req, err := http.NewRequest("POST", httpClient.IP.String()+url, bytes.NewBuffer(payload))
 	if err != nil {
 		httpClient.Logger.Error("error during creating request: %s", err)
-		return
+		return 0, nil, fmt.Errorf("error during creating http request")
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -32,26 +30,28 @@ func (httpClient *RemoteHttpServer) POST(url string, body any) (statusCode int, 
 	resp, err := client.Do(req)
 	if err != nil {
 		httpClient.Logger.Error("error during sending request: %s", err)
-		return
-	}
-	defer resp.Body.Close() // todo does this need to be somewhere else ?
-
-	statusCode = resp.StatusCode
-	if statusCode != 204 {
-		if responseBody, err = getResponseBody(resp); err != nil {
-			// todo does it raise exception if the response is empty?
-			httpClient.Logger.Error("error during creating request: %s", err)
-			return
-		}
+		return 0, nil, fmt.Errorf("error during sending http request")
 	}
 
-	//httpLogger.Infof("server: %s, ip: %s, status code: %d", s.Uuid, s.Ip, status)
-	return
+	// get status code & read response body
+	statusCode := resp.StatusCode
+	responseBody, err := getResponseBody(resp)
+	if err != nil {
+		httpClient.Logger.Error("error during reading response body: %s", err)
+		return statusCode, nil, fmt.Errorf("error during reading http response")
+	}
 
+	httpClient.Logger.Info("POST %s -> %d %s ", httpClient.IP.String()+url, statusCode, string(responseBody))
+	return statusCode, responseBody, nil
 }
 
 func getResponseBody(resp *http.Response) (body []byte, err error) {
 	body = make([]byte, 0)
-	_, err = resp.Body.Read(body)
-	return
+	bodyLen, err := resp.Body.Read(body)
+	resp.Body.Close()
+	if err != nil && bodyLen != 0 {
+		return nil, err
+	}
+	return body, nil
+
 }

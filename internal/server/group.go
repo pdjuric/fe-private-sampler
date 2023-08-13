@@ -1,46 +1,46 @@
 package server
 
 import (
-	"github.com/google/uuid"
+	. "fe/internal/common"
 	"sync"
 )
 
 type Group struct {
-	Uuid     uuid.UUID    `json:"id"`
+	Uuid     UUID         `json:"id"`
 	Sensors  []*Sensor    `json:"sensors"`
 	mutex    sync.RWMutex // lock to acquire when reading or changing the group
 	isLocked bool         // fixme
 }
 
-func (s *Server) AddGroup() *Group {
+func (server *Server) AddGroup() *Group {
 	group := &Group{
-		Uuid:     uuid.New(),
+		Uuid:     NewUUID(),
 		Sensors:  make([]*Sensor, 0),
 		mutex:    sync.RWMutex{},
 		isLocked: false,
 	}
-	s.groups.Store(group.Uuid, group)
+	server.groups.Store(group.Uuid, group)
 	return group
 }
 
-func (g *Group) Lock() {
-	if !g.isLocked {
-		g.mutex.Lock()
-		g.isLocked = true
-		logger.Info("group %s locked", g.Uuid)
-	} else {
-		logger.Info("group %s already locked", g.Uuid)
+func (g *Group) Lock() bool {
+	if g.isLocked {
+		return false
 	}
+
+	g.mutex.Lock()
+	g.isLocked = true
+	return true
 }
 
-func (g *Group) Unlock() {
-	if g.isLocked {
-		g.mutex.Unlock()
-		g.isLocked = false
-		logger.Info("group %s unlocked", g.Uuid)
-	} else {
-		logger.Info("group %s already unlocked", g.Uuid)
+func (g *Group) Unlock() bool {
+	if !g.isLocked {
+		return false
 	}
+
+	g.mutex.Unlock()
+	g.isLocked = false
+	return true
 }
 
 func (g *Group) AddSensor(s *Sensor) {
@@ -49,6 +49,4 @@ func (g *Group) AddSensor(s *Sensor) {
 
 	g.Sensors = append(g.Sensors, s)
 	s.Groups = append(s.Groups, g)
-
-	logger.Info("sensor %s added to group %s", s.Uuid, g.Uuid)
 }

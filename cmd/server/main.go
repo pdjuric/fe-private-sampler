@@ -3,16 +3,17 @@ package main
 import (
 	. "fe/internal/common"
 	. "fe/internal/server"
+	"fmt"
 )
 
 func main() {
 	// todo add args
 
-	logger := GetLoggerForFile("main", "server")
-	SetLogger(logger)
-
-	server := InitServer()
-	StartTaskDaemon(server.GetTaskChannel(), StartTaskWorker, logger) // todo accept
+	err := InitLogger("server")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
 
 	ip := IP{
 		Schema: "http",
@@ -20,7 +21,7 @@ func main() {
 		Port:   "8080",
 	}
 
-	server.HttpServer = InitHttpServer("server", ip, server.GetEndpoints())
-
-	server.RunHttpServer()
+	server := InitServer()
+	server.StartTaskDaemon(StartTaskWorker)
+	server.RunHttpServer(ip)
 }

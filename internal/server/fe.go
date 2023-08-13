@@ -37,8 +37,7 @@ func (feParams *SingleFEParams) GetSchemaName() string {
 
 func (feParams *SingleFEParams) GetEncryptionParams(sensorIdx int) (FEEncryptionParams, error) {
 	if sensorIdx != 0 {
-		logger.Error("requested EncryptionParams for sensorIdx %d for SingleFEParams", sensorIdx)
-		return nil, fmt.Errorf("sensorIdx out of range")
+		return nil, fmt.Errorf("requested EncryptionParams for sensorIdx %d for SingleFEParams", sensorIdx)
 	}
 
 	return &SingleFEEncryptionParams{
@@ -58,7 +57,7 @@ func (feParams *SingleFEParams) GetDecryptionKey(y []int) (FEDecryptionKey, erro
 
 	fk, err := schema.DeriveKey(data.NewVector(bigY), feParams.SecKey)
 	if err != nil {
-		logger.Error("Error during key derivation")
+		return nil, fmt.Errorf("error during key derivation")
 	}
 
 	return fk, nil
@@ -72,10 +71,10 @@ func (feParams *SingleFEParams) GetDecryptionKey(y []int) (FEDecryptionKey, erro
 type MultiFEParams struct {
 	SensorCnt int
 	// todo replace with batchparam?
-	BatchCnt int
-	Params   *fullysec.FHMultiIPEParams
-	SecKey   *fullysec.FHMultiIPESecKey
-	PubKey   *bn256.GT
+	BatchesPerSensor int
+	Params           *fullysec.FHMultiIPEParams
+	SecKey           *fullysec.FHMultiIPESecKey
+	PubKey           *bn256.GT
 }
 
 func (feParams *MultiFEParams) GetFEParams() any {
@@ -88,52 +87,49 @@ func (feParams *MultiFEParams) GetSchemaName() string {
 
 func (feParams *MultiFEParams) GetEncryptionParams(sensorIdx int) (FEEncryptionParams, error) {
 	if sensorIdx < 0 || sensorIdx >= feParams.SensorCnt {
-		err := fmt.Errorf("sensorIdx out of range (%d sensors, got %d )", feParams.SensorCnt, sensorIdx)
-		logger.Err(err)
-		return nil, err
+		return nil, fmt.Errorf("sensorIdx out of range (%d sensors, got %d )", feParams.SensorCnt, sensorIdx)
 	}
 
-	// todo change NumClients or not ???????????????
-	// every server submits batchCnt batches of samples
-	return &MultiFEEncryptionParams{
-		SecKeys: feParams.SecKey.BHat[sensorIdx*feParams.BatchCnt : (sensorIdx+1)*feParams.BatchCnt],
-		Params:  feParams.Params,
-	}, nil
+	// every sensor submits batchCnt batches of samples, so it needs exactly BatchesPerSensor SecKeys
+	encryptionParams := &MultiFEEncryptionParams{
+		SecKeys: feParams.SecKey.BHat[sensorIdx*feParams.BatchesPerSensor : (sensorIdx+1)*feParams.BatchesPerSensor],
+		Params:  *feParams.Params,
+	}
+
+	// overwrite Params.NumClients with BatchesPerSensor
+	// this won't make a difference, as this param is not used in the encryption process !!!
+	encryptionParams.Params.NumClients = feParams.BatchesPerSensor
+
+	return encryptionParams, nil
 }
 
 func (feParams *MultiFEParams) GetDecryptionKey(y []int) (FEDecryptionKey, error) {
+	// make data.Matrix from []int
+	cnt := feParams.BatchesPerSensor * feParams.SensorCnt
+	matrix := make([]data.Vector, cnt)
+	for i := 0; i < cnt; i++ {
+		matrix[i] = make([]*big.Int, feParams.Params.VecLen)
+		for j, val := range y {
+			matrix[i][j] = big.NewInt(int64(val))
+		}
+	}
 
 	schema := fullysec.NewFHMultiIPEFromParams(feParams.Params)
-
-	// make data.Matrix from []int
-	vectors := make([]data.Vector, feParams.BatchCnt*feParams.SensorCnt)
-	for row := 0; row < len(y); row++ {
-		bigY := make([]*big.Int, len(y))
-		for _, val := range y {
-			bigY = append(bigY, big.NewInt(int64(val)))
-		}
-		vectors = append(vectors, data.NewVector(bigY))
-	}
-
-	matrix, err := data.NewMatrix(vectors)
-	if err != nil {
-		logger.Error("error during matrix creation: %s", err)
-	}
-
 	fk, err := schema.DeriveKey(matrix, feParams.SecKey)
 	if err != nil {
-		logger.Error("error during key derivation: %s", err)
+		return nil, fmt.Errorf("error during key derivation: %s", err)
 	}
 
 	return &fk, nil
-
 }
 
 //endregion
 
 //region FEDecryptionParams
 
-// fixme not used for now, as only Cipher is sent during cipher submission
+// fixme not used for now, but if there were multiple decryption keys for the same task, this would be needed,
+// or if this was sent to another entity that would do the decryption
+
 type FEDecryptionParams interface {
 }
 
