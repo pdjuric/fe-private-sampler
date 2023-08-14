@@ -15,7 +15,7 @@ type FEParams interface {
 	GetFEParams() any
 	GetSchemaName() string
 	GetEncryptionParams(sensorIdx int) (FEEncryptionParams, error)
-	GetDecryptionKey(y []int) (FEDecryptionKey, error)
+	GetDecryptionParams(y []int) (FEDecryptionParams, error)
 }
 
 //endregion
@@ -46,7 +46,7 @@ func (feParams *SingleFEParams) GetEncryptionParams(sensorIdx int) (FEEncryption
 	}, nil
 }
 
-func (feParams *SingleFEParams) GetDecryptionKey(y []int) (FEDecryptionKey, error) {
+func (feParams *SingleFEParams) GetDecryptionParams(y []int) (FEDecryptionParams, error) {
 	schema := fullysec.NewFHIPEFromParams(feParams.Params)
 
 	// make []*big.Int from []int
@@ -60,8 +60,9 @@ func (feParams *SingleFEParams) GetDecryptionKey(y []int) (FEDecryptionKey, erro
 		return nil, fmt.Errorf("error during key derivation")
 	}
 
-	return fk, nil
-
+	return &SingleFEDecryptionParams{
+		DecryptionKey: fk,
+	}, nil
 }
 
 //endregion
@@ -103,15 +104,18 @@ func (feParams *MultiFEParams) GetEncryptionParams(sensorIdx int) (FEEncryptionP
 	return encryptionParams, nil
 }
 
-func (feParams *MultiFEParams) GetDecryptionKey(y []int) (FEDecryptionKey, error) {
+func (feParams *MultiFEParams) GetDecryptionParams(y []int) (FEDecryptionParams, error) {
 	// make data.Matrix from []int
-	cnt := feParams.BatchesPerSensor * feParams.SensorCnt
+	vecLen := feParams.Params.VecLen
+	cnt := feParams.BatchesPerSensor * feParams.SensorCnt * vecLen
 	matrix := make([]data.Vector, cnt)
-	for i := 0; i < cnt; i++ {
-		matrix[i] = make([]*big.Int, feParams.Params.VecLen)
-		for j, val := range y {
-			matrix[i][j] = big.NewInt(int64(val))
+	i := -1
+	for j, val := range y {
+		if j%vecLen == 0 {
+			i++
+			matrix[i] = make([]*big.Int, vecLen)
 		}
+		matrix[i][j%vecLen] = big.NewInt(int64(val))
 	}
 
 	schema := fullysec.NewFHMultiIPEFromParams(feParams.Params)
@@ -120,25 +124,28 @@ func (feParams *MultiFEParams) GetDecryptionKey(y []int) (FEDecryptionKey, error
 		return nil, fmt.Errorf("error during key derivation: %s", err)
 	}
 
-	return &fk, nil
+	return &MultiFEDecryptionParams{
+		FHMultiIPEParallelDecryption: schema.NewParallelDecryption(),
+		DecryptionKey:                &fk,
+		PubKey:                       feParams.PubKey,
+	}, nil
 }
 
 //endregion
 
 //region FEDecryptionParams
 
-// fixme not used for now, but if there were multiple decryption keys for the same task, this would be needed,
-// or if this was sent to another entity that would do the decryption
-
 type FEDecryptionParams interface {
 }
 
 type SingleFEDecryptionParams struct {
-	Key SingleFEDecryptionKey `json:"decryptionKey"`
+	DecryptionKey SingleFEDecryptionKey `json:"decryptionKey"`
 }
 
 type MultiFEDecryptionParams struct {
-	Key MultiFEDecryptionKey `json:"decryptionKey"`
+	*fullysec.FHMultiIPEParallelDecryption
+	DecryptionKey MultiFEDecryptionKey `json:"decryptionKey"`
+	PubKey        *bn256.GT
 }
 
 //endregion

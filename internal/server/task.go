@@ -6,6 +6,7 @@ import (
 	"github.com/fentec-project/gofe/innerprod/fullysec"
 	"math/big"
 	"net/http"
+	"sync/atomic"
 	"time"
 )
 
@@ -15,20 +16,25 @@ type Task struct {
 	Sensors []*Sensor `json:"sensors" default:"nil"`
 
 	// creation parameters
-	Group UUID `json:"group"`
+	GroupId UUID `json:"group"`
 	SamplingParams
-	BatchParams // derived
+	BatchParams
 
 	// todo add flag for secret coeffs or not
-	CoefficientsByPeriod []int `json:"coefficientsByPeriod"`
 	FEParams
+	FEDecryptionParams
+	CoefficientsByPeriod []int `json:"coefficientsByPeriod"`
 
-	// decryption
-	decryptionKey FEDecryptionKey
-	result        *big.Int
+	Result *big.Int
 
 	// times
 	MasterSecKeyGenerationTime time.Duration `json:"-"`
+	DecryptionTime             time.Duration `json:"-"`
+
+	// status
+	SubmittedTaskFlags  []atomic.Bool
+	SubmittedCipherCnts []atomic.Int32
+	KeyDerivedStatus    atomic.Bool
 
 	logger *Logger
 }
@@ -37,16 +43,21 @@ type Task struct {
 func NewTaskFromTaskRequest(taskRequest CreateTaskRequest) *Task {
 	id := NewUUID()
 	return &Task{
-		Id:     id,
-		Status: "created",
-		Group:  taskRequest.GroupId,
+		Id:      id,
+		Status:  "created",
+		GroupId: taskRequest.GroupId,
+
+		SamplingParams: taskRequest.SamplingParams,
 		BatchParams: BatchParams{
 			BatchSize: taskRequest.BatchSize,
 			BatchCnt:  taskRequest.SampleCount / taskRequest.BatchSize,
 		},
-		SamplingParams:       taskRequest.SamplingParams,
+
 		CoefficientsByPeriod: taskRequest.CoefficientsByPeriod,
-		logger:               GetLoggerForFile("", string(id)),
+
+		SubmittedTaskFlags: make([]atomic.Bool, taskRequest.SampleCount),
+
+		logger: GetLoggerForFile("", string(id)),
 	}
 }
 
@@ -68,6 +79,15 @@ func (t *Task) getMaxCoefficientValue() int {
 	return maxCoefficientValue + 1
 }
 
+func (t *Task) getSensorIdx(sensorId UUID) (int, error) {
+	for idx, sensor := range t.Sensors {
+		if sensor.Id == sensorId {
+			return idx, nil
+		}
+	}
+	return -1, fmt.Errorf("sensor %s not found in task %s", sensorId, t.Id)
+}
+
 // SetSensors sets Sensors (from provided Group) for Task, and calculates vectorLen and vectorCnt for the Task based on the number of  samplesPerSubmission
 func (t *Task) SetSensors(g *Group) error {
 	g.mutex.RLock()
@@ -80,24 +100,14 @@ func (t *Task) SetSensors(g *Group) error {
 		return err
 	}
 
+	sensorCnt := len(g.Sensors)
 	t.logger.Info("setting sensors for task %s", t.Id)
-	t.Sensors = make([]*Sensor, len(g.Sensors))
+	t.SubmittedTaskFlags = make([]atomic.Bool, sensorCnt)
+	t.SubmittedCipherCnts = make([]atomic.Int32, sensorCnt)
+	t.Sensors = make([]*Sensor, sensorCnt)
 	copy(t.Sensors, g.Sensors)
 
-	if t.BatchSize == t.SampleCount {
-		// opt 1: sending all samples at once, vectorLen = sampleCnt, vectors = sensorCnt
-
-		t.logger.Info("sending all samples at once")
-		t.BatchSize = t.SampleCount
-		t.BatchCnt = len(t.Sensors)
-	} else {
-		// opt 2: sending samples in batches, vectorLen = SamplesPerSubmission, vectors = sensorCnt * submissionCnt
-
-		t.logger.Info("sending samples in batches")
-		//fixme zakomentarisano t.BatchSize = &t.SamplesPerSubmission
-		t.BatchCnt = len(t.Sensors) * t.SampleCount / t.BatchSize
-	}
-
+	t.BatchCnt = sensorCnt * t.SampleCount / t.BatchSize
 	t.Status = "sensors set"
 	return nil
 }
@@ -177,6 +187,8 @@ func (t *Task) setMultiFEParams() bool {
 func (t *Task) Submit() bool {
 	// todo add parallel execution
 	for idx, sensor := range t.Sensors {
+		// assert that it isn't already sent
+
 		t.logger.Info("submitting task to sensor %s", sensor.Id)
 		feEncryptionParams, err := t.GetEncryptionParams(idx)
 		if err != nil {
@@ -197,6 +209,7 @@ func (t *Task) Submit() bool {
 			return false
 		}
 
+		t.SubmittedTaskFlags[idx].Store(true)
 		t.logger.Info("task submitted to sensor %s", sensor.Id)
 		// todo check whether start time has already passed
 	}
@@ -205,14 +218,15 @@ func (t *Task) Submit() bool {
 
 func (t *Task) DeriveDecryptionKey() bool {
 	t.logger.Info("deriving decryption key")
-	decryptionKey, err := t.GetDecryptionKey(t.CoefficientsByPeriod)
+	decryptionParams, err := t.GetDecryptionParams(t.CoefficientsByPeriod)
 	if err != nil {
 		t.logger.Err(err)
 		t.logger.Info("error during deriving decryption key")
 		return false
 	}
 
+	t.KeyDerivedStatus.Store(true)
 	t.logger.Info("decryption key derived successfully")
-	t.decryptionKey = decryptionKey
+	t.FEDecryptionParams = decryptionParams
 	return true
 }

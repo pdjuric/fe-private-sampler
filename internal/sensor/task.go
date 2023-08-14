@@ -130,3 +130,15 @@ func (t *Task) CloseEncryptionChan() bool {
 func (t *Task) cleanup() {
 	// todo add cleanup
 }
+
+func (t *Task) GetSamples() [][]int32 {
+	samples := make([][]int32, 0)
+	for idx := 0; idx < t.BatchCnt; idx++ {
+		samplesFromBatch := t.batches[idx].GetSamples()
+		if samplesFromBatch == nil {
+			break
+		}
+		samples = append(samples, samplesFromBatch)
+	}
+	return samples
+}

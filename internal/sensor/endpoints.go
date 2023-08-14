@@ -118,11 +118,33 @@ func (sensor *Sensor) registerSensorEndpoint(c *gin.Context) {
 	c.String(200, "??")
 }
 
+func (sensor *Sensor) getSamplesEndpoint(c *gin.Context) {
+	// get task uuid
+	taskIdString := c.Param("id")
+	taskId, err := NewUUIDFromString(taskIdString)
+	if err != nil {
+		sensor.HttpLogger.Err(err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid task uuid"})
+		return
+	}
+
+	// get task
+	task, err := sensor.GetTask(taskId)
+	if err != nil {
+		sensor.HttpLogger.Err(err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err})
+		return
+	}
+
+	c.JSON(http.StatusOK, task.GetSamples())
+}
+
 func (sensor *Sensor) GetEndpoints() []Endpoint {
 	return []Endpoint{
 		{"POST", "/server", sensor.setServerEndpoint},
 		{"POST", "/group", sensor.setGroupEndpoint},
 		{"POST", "/task", sensor.submitTaskEndpoint},
 		{"GET", "/register", sensor.registerSensorEndpoint},
+		{"GET", "/task/:id/samples", sensor.getSamplesEndpoint},
 	}
 }

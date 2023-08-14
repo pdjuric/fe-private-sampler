@@ -6,6 +6,7 @@ import (
 	"github.com/fentec-project/gofe/innerprod/fullysec"
 	"github.com/gin-gonic/gin"
 	"net/http"
+	"time"
 )
 
 // addSensorEndpoint creates new Sensor (or fetches existing) and adds it to the specified Group
@@ -199,7 +200,10 @@ func (server *Server) addTaskEndpoint(c *gin.Context) {
 		errors = append(errors, fmt.Errorf("batch size must be a divisor of sample count (%d mod %d != 0)", taskRequest.SampleCount, taskRequest.BatchSize))
 	}
 
+	// todo assert that maxvalue fits in int64
 	// todo assert >=1 period
+	// todo assert SampleCount > 0
+	// todo assert t.BatchSize > 0
 	// todo assert start is in the future
 
 	if len(errors) > 0 {
@@ -233,7 +237,7 @@ func (server *Server) addTaskEndpoint(c *gin.Context) {
 	server.SendTaskToDaemon(task)
 	server.HttpLogger.Info("task %s sent to task daemon", task.Id)
 
-	c.String(http.StatusAccepted, "task %s added", task.Id)
+	c.String(http.StatusAccepted, "%s", task.Id)
 }
 
 func (server *Server) removeTaskEndpoint(c *gin.Context) {
@@ -244,6 +248,67 @@ func (server *Server) getTaskDetailsEndpoint(c *gin.Context) {
 	// todo
 	//    returns task status
 	//    how many submissions from each server occurred, and when is the next submission
+
+	// get task uuid
+	taskIdString := c.Param("id")
+	taskId, err := NewUUIDFromString(taskIdString)
+	if err != nil {
+		server.HttpLogger.Err(err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid task uuid"})
+		return
+	}
+
+	// get task
+	task, err := server.GetTask(taskId)
+	if err != nil {
+		server.HttpLogger.Err(err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err})
+		return
+	}
+
+	type sensorInfo struct {
+		Ids             UUID  `json:"ids"`
+		SubmittedTask   bool  `json:"submittedTask"`
+		SubmittedCipher int32 `json:"submittedCiphers"`
+	}
+
+	response := struct {
+		TaskId  UUID         `json:"taskId"`
+		GroupId UUID         `json:"groupId"`
+		Sensors []sensorInfo `json:"sensors"`
+		SamplingParams
+		BatchParams
+
+		Result      int64 `json:"result"`
+		ResultReady bool  `json:"resultReady"`
+
+		Mgt string `json:"masterSecretKeyGenTime"`
+		Dt  string `json:"decryptionTime"`
+	}{
+		TaskId:         task.Id,
+		GroupId:        task.GroupId,
+		Sensors:        make([]sensorInfo, len(task.Sensors)),
+		SamplingParams: task.SamplingParams,
+		BatchParams:    task.BatchParams,
+
+		Mgt: fmt.Sprintf("%d ms", task.MasterSecKeyGenerationTime.Milliseconds()),
+		Dt:  fmt.Sprintf("%d ms", task.DecryptionTime.Milliseconds()),
+	}
+
+	response.ResultReady = task.Result != nil
+	if task.Result != nil {
+		response.Result = task.Result.Int64()
+	}
+
+	for idx, sensor := range task.Sensors {
+		response.Sensors[idx] = sensorInfo{
+			Ids:             sensor.Id,
+			SubmittedTask:   task.SubmittedTaskFlags[idx].Load(),
+			SubmittedCipher: task.SubmittedCipherCnts[idx].Load(),
+		}
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 func (server *Server) submitCipherEndpoint(c *gin.Context) {
@@ -258,23 +323,18 @@ func (server *Server) submitCipherEndpoint(c *gin.Context) {
 	}
 
 	// get task
-	taskAny, exists := server.tasks.Load(taskId)
-	if !exists {
-		err := fmt.Errorf("task %s does not exist", taskId)
+	task, err := server.GetTask(taskId)
+	if err != nil {
 		server.HttpLogger.Err(err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err})
 		return
 	}
 
-	task := taskAny.(*Task)
-
-	if task.decryptionKey == nil {
+	if task.FEDecryptionParams == nil {
 		server.HttpLogger.Error("decryption key is not derived")
 		c.JSON(http.StatusTooEarly, gin.H{"error": "try again later"})
 		return
 	}
-
-	// todo assert that sensor works for the task
 
 	// todo assert that remote ip is the ip of the sensor
 
@@ -295,6 +355,14 @@ func (server *Server) submitCipherEndpoint(c *gin.Context) {
 		return
 	}
 
+	// assert that sensor works for the task
+	sensorIdx, err := task.getSensorIdx(request.SensorId)
+	if err != nil {
+		server.HttpLogger.Err(err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err})
+		return
+	}
+
 	switch task.GetSchemaName() {
 	case SchemaFHIPE:
 
@@ -303,19 +371,51 @@ func (server *Server) submitCipherEndpoint(c *gin.Context) {
 		// generate schema
 		schema := fullysec.NewFHIPEFromParams(task.FEParams.(*SingleFEParams).Params)
 
-		res, err := schema.Decrypt(cipher, task.decryptionKey.(SingleFEDecryptionKey))
+		start := time.Now()
+		res, err := schema.Decrypt(cipher, task.FEDecryptionParams.(*SingleFEDecryptionParams).DecryptionKey)
+		task.DecryptionTime = time.Since(start)
 		if err != nil {
 			fmt.Print(err)
 			return
 		}
 
-		task.result = res
-		fmt.Printf("task %s result %s\n", task.Id, res.String())
+		task.SubmittedCipherCnts[sensorIdx].Add(1)
+		task.Result = res
+		fmt.Printf("task %s Result %s\n", task.Id, res.String())
 
 	case SchemaFHMultiIPE:
 
-		//// todo complete
+		cipher := request.Cipher.(*MultiFECipher)
 
+		// generate schema
+		decryptionParams := task.FEDecryptionParams.(*MultiFEDecryptionParams)
+		u := decryptionParams.FHMultiIPEParallelDecryption
+		key := decryptionParams.DecryptionKey
+
+		start := time.Now()
+		remainingBatches, err := u.ParallelDecryption(request.BatchIdx, *cipher, *key)
+		fmt.Printf("sensor no %d, batch no %d, time %d ms", sensorIdx, request.BatchIdx, time.Since(start).Milliseconds())
+		if err != nil {
+			fmt.Print(err)
+			return
+		}
+
+		task.SubmittedCipherCnts[sensorIdx].Add(1)
+
+		if remainingBatches == 0 {
+			start := time.Now()
+
+			result, err := u.GetResult(false, decryptionParams.PubKey)
+			task.DecryptionTime = time.Since(start)
+			if err != nil {
+				fmt.Printf("wtf")
+				fmt.Print(err)
+				return
+			}
+			task.Result = result
+			task.logger.Info("task %s Result %s", task.Id, result.String())
+			fmt.Printf("task %s Result %s\n", task.Id, result.String())
+		}
 	}
 
 	c.Status(http.StatusAccepted)

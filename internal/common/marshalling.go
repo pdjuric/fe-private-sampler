@@ -255,7 +255,7 @@ func (r *SubmitCipherRequest) UnmarshalJSON(schema string, data []byte) error {
 
 	case SchemaFHMultiIPE:
 		tempCipherStruct := struct {
-			Params *MultiFECipher `json:"cipher"`
+			Cipher *MultiFECipher `json:"cipher"`
 		}{}
 
 		err = json.Unmarshal(data, &tempCipherStruct)
@@ -263,7 +263,7 @@ func (r *SubmitCipherRequest) UnmarshalJSON(schema string, data []byte) error {
 			return err
 		}
 
-		r.Cipher = tempCipherStruct
+		r.Cipher = tempCipherStruct.Cipher
 
 	default:
 		return fmt.Errorf("unknown schema %s", schema)

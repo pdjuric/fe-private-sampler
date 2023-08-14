@@ -35,6 +35,21 @@ func (b *Batch) AddSample(sample int) bool {
 	return newSampleIdx == b.totalSamplesCnt-1
 }
 
+func (b *Batch) GetSamples() []int32 {
+	sampleCnt := b.receivedSamplesCnt.Load()
+	if sampleCnt == 0 {
+		return nil
+	}
+
+	samples := make([]int32, sampleCnt)
+	var idx int32
+	for idx = 0; idx < sampleCnt; idx++ {
+		samples[idx] = int32(b.samples[idx].Int64())
+	}
+
+	return samples
+}
+
 func (b *Batch) Encrypt(schemaName string, feEncryptionParams FEEncryptionParams) error {
 	switch schemaName {
 	case SchemaFHIPE:
