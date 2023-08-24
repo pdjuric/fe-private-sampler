@@ -7,7 +7,7 @@ import (
 type Endpoint struct {
 	Method   string
 	Path     string
-	Function func(c *gin.Context)
+	Function func(c *gin.Context) (ResponseType, int, any)
 }
 
 // todo what if machine is not online ????
@@ -35,10 +35,40 @@ func (host *HttpServer) RunHttpServer(ip IP) {
 	host.IP = &ip
 	router := gin.Default()
 
-	addLogging := func(fnToCall func(c *gin.Context)) func(c *gin.Context) {
+	addLogging := func(fnToCall func(c *gin.Context) (ResponseType, int, any)) func(c *gin.Context) {
 		return func(c *gin.Context) {
 			host.HttpLogger.Info("%s -->   %-6s   %s", c.RemoteIP(), c.Request.Method, c.Request.URL.String())
-			fnToCall(c)
+			responseType, code, body := fnToCall(c)
+			switch responseType {
+			case StringResponse:
+				c.String(code, body.(string))
+			case JSONResponse:
+				c.JSON(code, body)
+			case DataResponse:
+				c.Data(code, "application/octet-stream", body.([]byte))
+			case NoResponse:
+				c.Status(code)
+			case ErrorResponse:
+
+				switch body.(type) {
+				case error:
+					host.HttpLogger.Err(body.(error))
+					c.JSON(code, gin.H{"error": body})
+				case string:
+					host.HttpLogger.Error(body.(string))
+					c.JSON(code, gin.H{"error": body})
+
+				case []error:
+					for _, err := range body.([]error) {
+						host.HttpLogger.Err(err)
+					}
+					c.JSON(code, gin.H{"errors": body})
+				default:
+					panic("unknown response type")
+				}
+
+			}
+
 		}
 	}
 

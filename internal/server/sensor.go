@@ -39,16 +39,14 @@ func (s *Sensor) RemoveFromGroup(g *Group) {
 	}
 }
 
-func (s *Sensor) SubmitTask(taskId UUID, batchParams BatchParams, samplingParams SamplingParams, schema string, encryptionParams FEEncryptionParams) (statusCode int, responseBody []byte, e error) {
+func (s *Sensor) SubmitTask(taskId UUID, samplingParams SamplingParams, authorityIp IP) (statusCode int, responseBody []byte, e error) {
 	//method := "POST"
 	url := "/task"
-	body := SubmitTaskRequest{
-		TaskId:             taskId,
-		BatchParams:        batchParams,
-		SamplingParams:     samplingParams,
-		Schema:             schema,
-		FEEncryptionParams: encryptionParams,
+	body := SubmitSensorTaskRequest{
+		TaskId:         taskId,
+		SamplingParams: samplingParams,
+		AuthorityIP:    authorityIp,
 	}
 
-	return s.POST(url, body)
+	return s.POST(url, body, BodyJSON)
 }

@@ -49,23 +49,3 @@ func (b *Batch) GetSamples() []int32 {
 
 	return samples
 }
-
-func (b *Batch) Encrypt(schemaName string, feEncryptionParams FEEncryptionParams) error {
-	switch schemaName {
-	case SchemaFHIPE:
-		cipher, elapsedTime, err := SingleFEEncrypt(feEncryptionParams.(*SingleFEEncryptionParams), b.samples)
-		b.cipher = cipher
-		b.encryptionTime = elapsedTime
-		return err
-
-	case SchemaFHMultiIPE:
-		cipher, elapsedTime, err := MultiFEEncrypt(b.idx, feEncryptionParams.(*MultiFEEncryptionParams), b.samples)
-		b.cipher = cipher
-		b.encryptionTime = elapsedTime
-		return err
-
-	default:
-		// will never happen
-		return nil
-	}
-}

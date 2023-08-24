@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-func main() {
+func ServerMain() {
 	// todo add args
 
 	err := InitLogger("server")
@@ -21,7 +21,13 @@ func main() {
 		Port:   "8080",
 	}
 
+	GobInit()
+
 	server := InitServer()
 	server.StartTaskDaemon(StartTaskWorker)
 	server.RunHttpServer(ip)
+}
+
+func main() {
+	ServerMain()
 }

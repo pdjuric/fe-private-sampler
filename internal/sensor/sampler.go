@@ -23,7 +23,7 @@ func sampler(r *Runnable, samplingDetails *SamplingParams, sampleChan *chan int,
 
 	start := time.Unix(int64(samplingDetails.Start), 0)
 	period := time.Duration(samplingDetails.SamplingPeriod) * time.Second
-	sampleCount := samplingDetails.SampleCount
+	sampleCount := samplingDetails.BatchCnt * samplingDetails.BatchSize
 	maxSampleValue := samplingDetails.MaxSampleValue
 
 	r.Start()

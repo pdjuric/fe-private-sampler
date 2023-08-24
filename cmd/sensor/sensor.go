@@ -8,7 +8,7 @@ import (
 	"os"
 )
 
-func main() {
+func SensorMain() {
 	// init server
 	args := os.Args[1:]
 	argsCnt := len(args)
@@ -36,7 +36,13 @@ func main() {
 		Port:   args[1],
 	}
 
+	GobInit()
+
 	sensor := InitSensor()
 	sensor.StartTaskDaemon(StartTaskWorker)
 	sensor.RunHttpServer(ip)
+}
+
+func main() {
+	SensorMain()
 }

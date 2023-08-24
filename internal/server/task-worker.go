@@ -7,7 +7,9 @@ func StartTaskWorker(task *Task) {
 
 // taskWorker submits Task to its sensors and derives the decryption key
 func taskWorker(task *Task) {
-	ok := task.SetFEParams()
+
+	// Generating FE params
+	ok := task.GetFESchemaParams()
 	if !ok {
 		return
 	}
@@ -16,7 +18,7 @@ func taskWorker(task *Task) {
 	// - derive functional encryption key
 	// - send task to the server(s)
 
-	go task.Submit()
+	go task.SubmitToSensors()
 
 	task.DeriveDecryptionKey()
 }

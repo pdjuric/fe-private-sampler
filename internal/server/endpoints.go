@@ -3,55 +3,42 @@ package server
 import (
 	. "fe/internal/common"
 	"fmt"
-	"github.com/fentec-project/gofe/innerprod/fullysec"
 	"github.com/gin-gonic/gin"
 	"net/http"
-	"time"
 )
 
 // addSensorEndpoint creates new Sensor (or fetches existing) and adds it to the specified Group
 // @endpoint /groups/:id/sensors [POST]
-func (server *Server) addSensorEndpoint(c *gin.Context) {
+func (server *Server) addSensorEndpoint(c *gin.Context) (ResponseType, int, any) {
 	//region param parsing
 	groupIdString := c.Param("id")
 
 	var body RegisterSensorRequest
 	if err := c.BindJSON(&body); err != nil {
-		server.HttpLogger.Err(err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err})
-		return
+		return ErrorResponse, http.StatusBadRequest, err
 	}
 	//endregion
 
 	groupId, err := NewUUIDFromString(groupIdString)
 	if err != nil {
-		server.HttpLogger.Err(err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err})
-		return
+		return ErrorResponse, http.StatusBadRequest, err
 	}
 
 	group, err := server.GetGroup(groupId)
 	if err != nil {
-		server.HttpLogger.Err(err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err})
-		return
+		return ErrorResponse, http.StatusBadRequest, err
 	}
 
 	if !body.SensorId.Verify() {
-		err = fmt.Errorf("invalid uuid %s", body.SensorId)
-		server.HttpLogger.Err(err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err})
-		//todo or this c.AbortWithError(http.StatusBadRequest, err) ???
-		return
+		return ErrorResponse, http.StatusBadRequest, fmt.Sprintf("invalid uuid %s", body.SensorId)
 	}
 
 	server.AddSensorToGroup(body.SensorId, body.IP, group)
 
-	// todo what should be the response
-	c.Status(http.StatusNoContent)
+	return NoResponse, http.StatusNoContent, nil
 }
 
-func (server *Server) removeSensorEndpoint(c *gin.Context) {
+func (server *Server) removeSensorEndpoint(c *gin.Context) (ResponseType, int, any) {
 	//region param parsing
 	groupIdString := c.Param("id")
 
@@ -60,32 +47,23 @@ func (server *Server) removeSensorEndpoint(c *gin.Context) {
 	}
 
 	if err := c.BindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
-		return
+		return ErrorResponse, http.StatusBadRequest, err
 	}
 	//endregion
 
 	groupId, err := NewUUIDFromString(groupIdString)
 	if err != nil {
-		server.HttpLogger.Err(err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err})
-		return
+		return ErrorResponse, http.StatusBadRequest, err
 	}
 
 	group, err := server.GetGroup(groupId)
 	if err != nil {
-		server.HttpLogger.Err(err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err})
-		return
+		return ErrorResponse, http.StatusBadRequest, err
 	}
 
 	sensorId, err := NewUUIDFromString(body.SensorId)
 	if err != nil {
-		server.HttpLogger.Err(err)
-		c.AbortWithError(http.StatusBadRequest, err)
-		return
+		return ErrorResponse, http.StatusBadRequest, err
 	}
 
 	// todo move to server
@@ -98,106 +76,103 @@ func (server *Server) removeSensorEndpoint(c *gin.Context) {
 	sensor.(*Sensor).RemoveFromGroup(group)
 
 	// todo what should be the response
-	c.Status(http.StatusNoContent)
+	return NoResponse, http.StatusNoContent, nil
 }
 
-func (server *Server) createGroupEndpoint(ctxt *gin.Context) {
+func (server *Server) createGroupEndpoint(c *gin.Context) (ResponseType, int, any) {
 	group := server.AddGroup()
 
 	// return group uuid
 	server.HttpLogger.Info("created group %s [%s]", group.Uuid, group)
-	ctxt.JSON(http.StatusOK, gin.H{"id": group.Uuid})
+	return JSONResponse, http.StatusCreated, gin.H{"id": group.Uuid}
 }
 
 // POST /group/:id
-func (server *Server) getGroupDetailsEndpoint(c *gin.Context) {
+func (server *Server) getGroupDetailsEndpoint(c *gin.Context) (ResponseType, int, any) {
 	//region param parsing
 	groupIdString := c.Param("id")
 	//endregion
 
 	groupId, err := NewUUIDFromString(groupIdString)
 	if err != nil {
-		server.HttpLogger.Err(err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err})
-		return
+		return ErrorResponse, http.StatusBadRequest, err
 	}
 
 	group, err := server.GetGroup(groupId)
 	if err != nil {
-		server.HttpLogger.Err(err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err})
-		return
+		return ErrorResponse, http.StatusBadRequest, err
 	}
 
-	c.JSON(http.StatusOK, group)
+	return JSONResponse, http.StatusOK, group
 }
 
 // GET /group/:id/lock
-func (server *Server) lockGroupEndpoint(c *gin.Context) {
+func (server *Server) lockGroupEndpoint(c *gin.Context) (ResponseType, int, any) {
 	groupIdString := c.Param("id")
 	groupId, err := NewUUIDFromString(groupIdString)
 	if err != nil {
-		server.HttpLogger.Err(err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err})
-		return
+		return ErrorResponse, http.StatusBadRequest, err
 	}
 
 	group, err := server.GetGroup(groupId)
 	if err != nil {
-		server.HttpLogger.Err(err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err})
-		return
+		return ErrorResponse, http.StatusBadRequest, err
 	}
 
 	group.Lock()
 
-	c.Status(http.StatusNoContent)
+	return NoResponse, http.StatusNoContent, nil
 }
 
-func (server *Server) unlockGroupEndpoint(c *gin.Context) {
+func (server *Server) unlockGroupEndpoint(c *gin.Context) (ResponseType, int, any) {
 	groupIdString := c.Param("id")
 	groupId, err := NewUUIDFromString(groupIdString)
 	if err != nil {
-		server.HttpLogger.Err(err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err})
-		return
+		return ErrorResponse, http.StatusBadRequest, err
 	}
 
 	group, err := server.GetGroup(groupId)
 	if err != nil {
-		server.HttpLogger.Err(err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err})
-		return
+		return ErrorResponse, http.StatusBadRequest, err
 	}
 
 	group.Unlock()
 
-	c.Status(http.StatusNoContent)
+	return NoResponse, http.StatusNoContent, nil
 }
 
 // addTaskEndpoint creates a new Task based on CreateTaskRequest and sends it to the TaskDaemon chan
 // @endpoint /group/:id/task [POST]
-func (server *Server) addTaskEndpoint(c *gin.Context) {
+func (server *Server) addTaskEndpoint(c *gin.Context) (ResponseType, int, any) {
+
+	// todo assert that authority is set
+	if !server.IsAuthoritySet() {
+		return ErrorResponse, http.StatusBadRequest, "authority must be set before task creation"
+	}
 
 	// Parse the JSON data from the request body into the CreateTaskRequest struct
 	var taskRequest CreateTaskRequest
 	if err := c.BindJSON(&taskRequest); err != nil {
-		server.HttpLogger.Err(err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err})
-		return
+		return ErrorResponse, http.StatusBadRequest, err
 	}
 
 	//region asserts
 	errors := make([]error, 0)
 
 	// there should be exactly SampleCount coefficients
-	if len(taskRequest.CoefficientsByPeriod) != taskRequest.SampleCount {
-		errors = append(errors, fmt.Errorf("there should be exactly SampleCount coefficients (expected %d, got %d)", taskRequest.SampleCount, len(taskRequest.CoefficientsByPeriod)))
+	rate, exists := GetRate(taskRequest.RateId)
+	if !exists {
+		return ErrorResponse, http.StatusBadRequest, fmt.Sprintf("rate with id %s does not exist", taskRequest.RateId)
 	}
 
 	// submission frequency must be a divisor of sample count
-	if taskRequest.SampleCount%taskRequest.BatchSize != 0 {
-		errors = append(errors, fmt.Errorf("batch size must be a divisor of sample count (%d mod %d != 0)", taskRequest.SampleCount, taskRequest.BatchSize))
+	if taskRequest.Duration%(rate.BatchSize*rate.SamplingPeriod) != 0 {
+		//todo edit message
+		//errors = append(errors, fmt.Errorf("subscription dura...tion batch size must be a divisor of sample count (%d mod %d != 0)", taskRequest.SampleCount, taskRequest.BatchSize))
+	}
+
+	if taskRequest.Duration/(rate.SamplingPeriod*rate.BatchSize) == 0 {
+
 	}
 
 	// todo assert that maxvalue fits in int64
@@ -207,11 +182,7 @@ func (server *Server) addTaskEndpoint(c *gin.Context) {
 	// todo assert start is in the future
 
 	if len(errors) > 0 {
-		for _, err := range errors {
-			server.HttpLogger.Err(err)
-		}
-		c.JSON(http.StatusBadRequest, gin.H{"error": errors})
-		return
+		return ErrorResponse, http.StatusBadRequest, errors
 	}
 
 	//endregion
@@ -219,17 +190,14 @@ func (server *Server) addTaskEndpoint(c *gin.Context) {
 	// get GroupId
 	group, err := server.GetGroup(taskRequest.GroupId)
 	if err != nil {
-		server.HttpLogger.Err(err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err})
-		return
+		return ErrorResponse, http.StatusBadRequest, err
 	}
 
 	// create new Task
-	task := NewTaskFromTaskRequest(taskRequest)
+
+	task := server.NewTask(taskRequest)
 	if err = task.SetSensors(group); err != nil {
-		server.HttpLogger.Err(err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err})
-		return
+		return ErrorResponse, http.StatusBadRequest, err
 	}
 
 	// send task to TaskDaemon
@@ -237,14 +205,26 @@ func (server *Server) addTaskEndpoint(c *gin.Context) {
 	server.SendTaskToDaemon(task)
 	server.HttpLogger.Info("task %s sent to task daemon", task.Id)
 
-	c.String(http.StatusAccepted, "%s", task.Id)
+	return StringResponse, http.StatusAccepted, string(task.Id)
 }
 
-func (server *Server) removeTaskEndpoint(c *gin.Context) {
-	// todo
+func (server *Server) addRateEndpoint(c *gin.Context) (ResponseType, int, any) {
+	rate := NewRate()
+
+	if err := c.BindJSON(&rate); err != nil {
+		return ErrorResponse, http.StatusBadRequest, err
+	}
+
+	SaveRate(rate)
+
+	return StringResponse, http.StatusAccepted, string(rate.id)
 }
 
-func (server *Server) getTaskDetailsEndpoint(c *gin.Context) {
+func (server *Server) removeTaskEndpoint(c *gin.Context) (ResponseType, int, any) {
+	return ErrorResponse, http.StatusInternalServerError, "not implemented"
+}
+
+func (server *Server) getTaskDetailsEndpoint(c *gin.Context) (ResponseType, int, any) {
 	// todo
 	//    returns task status
 	//    how many submissions from each server occurred, and when is the next submission
@@ -253,17 +233,13 @@ func (server *Server) getTaskDetailsEndpoint(c *gin.Context) {
 	taskIdString := c.Param("id")
 	taskId, err := NewUUIDFromString(taskIdString)
 	if err != nil {
-		server.HttpLogger.Err(err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid task uuid"})
-		return
+		return ErrorResponse, http.StatusBadRequest, "invalid task uuid"
 	}
 
 	// get task
 	task, err := server.GetTask(taskId)
 	if err != nil {
-		server.HttpLogger.Err(err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err})
-		return
+		return ErrorResponse, http.StatusBadRequest, err
 	}
 
 	type sensorInfo struct {
@@ -281,22 +257,16 @@ func (server *Server) getTaskDetailsEndpoint(c *gin.Context) {
 
 		Result      int64 `json:"result"`
 		ResultReady bool  `json:"resultReady"`
-
-		Mgt string `json:"masterSecretKeyGenTime"`
-		Dt  string `json:"decryptionTime"`
 	}{
 		TaskId:         task.Id,
 		GroupId:        task.GroupId,
 		Sensors:        make([]sensorInfo, len(task.Sensors)),
 		SamplingParams: task.SamplingParams,
 		BatchParams:    task.BatchParams,
-
-		Mgt: fmt.Sprintf("%d ms", task.MasterSecKeyGenerationTime.Milliseconds()),
-		Dt:  fmt.Sprintf("%d ms", task.DecryptionTime.Milliseconds()),
 	}
 
 	response.ResultReady = task.Result != nil
-	if task.Result != nil {
+	if response.ResultReady {
 		response.Result = task.Result.Int64()
 	}
 
@@ -308,117 +278,65 @@ func (server *Server) getTaskDetailsEndpoint(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, response)
+	return JSONResponse, http.StatusOK, response
 }
 
-func (server *Server) submitCipherEndpoint(c *gin.Context) {
+func (server *Server) submitCipherEndpoint(c *gin.Context) (ResponseType, int, any) {
 
 	// get task uuid
-	taskIdString := c.Param("id")
+	taskIdString := c.Param("taskId")
 	taskId, err := NewUUIDFromString(taskIdString)
 	if err != nil {
-		server.HttpLogger.Err(err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid task uuid"})
-		return
+		return ErrorResponse, http.StatusBadRequest, "invalid task uuid"
 	}
 
 	// get task
 	task, err := server.GetTask(taskId)
 	if err != nil {
-		server.HttpLogger.Err(err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err})
-		return
+		return ErrorResponse, http.StatusBadRequest, err
 	}
 
-	if task.FEDecryptionParams == nil {
-		server.HttpLogger.Error("decryption key is not derived")
-		c.JSON(http.StatusTooEarly, gin.H{"error": "try again later"})
-		return
-	}
+	//// todo assert that remote ip is the ip of the sensor
+	// asssert sensor id
 
-	// todo assert that remote ip is the ip of the sensor
-
-	// fixme do this in a separate goroutine
-
-	// does not unmarshall cipher, as there's no way of knowing the type of the cipher
-	request := new(SubmitCipherRequest)
+	// get FECipher
 	bytes, err := c.GetRawData()
 	if err != nil {
-		server.HttpLogger.Err(err)
-		c.Status(http.StatusInternalServerError)
-		return
+		return ErrorResponse, http.StatusBadRequest, err
 	}
 
-	err = request.UnmarshalJSON(task.GetSchemaName(), bytes)
-	if err != nil {
-		server.HttpLogger.Err(err)
-		return
+	feCipher, err := Decode(bytes)
+
+	// won't return any errors, we'll need to check for errors
+	go task.AddCipher(feCipher)
+
+	return NoResponse, http.StatusAccepted, nil
+}
+
+func (server *Server) setAuthorityEndpoint(c *gin.Context) (ResponseType, int, any) {
+
+	var ip IP
+	if err := c.BindJSON(&ip); err != nil {
+		return ErrorResponse, http.StatusBadRequest, err
 	}
 
-	// assert that sensor works for the task
-	sensorIdx, err := task.getSensorIdx(request.SensorId)
-	if err != nil {
-		server.HttpLogger.Err(err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err})
-		return
+	newAuthority := server.NewAuthority(ip)
+
+	// assert that Sensor doesn't already have Server
+	if server.Authority == nil {
+		server.Authority = newAuthority
+		msg := fmt.Sprintf("authority %s set successfully", ip)
+		server.HttpLogger.Info(msg)
+		return StringResponse, http.StatusOK, msg
+
+	} else if server.Authority.IP.String() == newAuthority.IP.String() {
+		msg := fmt.Sprintf("authority %s is already set", server.Authority.IP.String())
+		server.HttpLogger.Info(msg)
+		return StringResponse, http.StatusOK, msg
+
+	} else {
+		return ErrorResponse, http.StatusBadRequest, fmt.Errorf("could not set authority %s, as authority %s is already set", newAuthority.IP.String(), server.Authority.IP.String())
 	}
-
-	switch task.GetSchemaName() {
-	case SchemaFHIPE:
-
-		cipher := request.Cipher.(*SingleFECipher)
-
-		// generate schema
-		schema := fullysec.NewFHIPEFromParams(task.FEParams.(*SingleFEParams).Params)
-
-		start := time.Now()
-		res, err := schema.Decrypt(cipher, task.FEDecryptionParams.(*SingleFEDecryptionParams).DecryptionKey)
-		task.DecryptionTime = time.Since(start)
-		if err != nil {
-			fmt.Print(err)
-			return
-		}
-
-		task.SubmittedCipherCnts[sensorIdx].Add(1)
-		task.Result = res
-		fmt.Printf("task %s Result %s\n", task.Id, res.String())
-
-	case SchemaFHMultiIPE:
-
-		cipher := request.Cipher.(*MultiFECipher)
-
-		// generate schema
-		decryptionParams := task.FEDecryptionParams.(*MultiFEDecryptionParams)
-		u := decryptionParams.FHMultiIPEParallelDecryption
-		key := decryptionParams.DecryptionKey
-
-		start := time.Now()
-		remainingBatches, err := u.ParallelDecryption(request.BatchIdx, *cipher, *key)
-		fmt.Printf("sensor no %d, batch no %d, time %d ms", sensorIdx, request.BatchIdx, time.Since(start).Milliseconds())
-		if err != nil {
-			fmt.Print(err)
-			return
-		}
-
-		task.SubmittedCipherCnts[sensorIdx].Add(1)
-
-		if remainingBatches == 0 {
-			start := time.Now()
-
-			result, err := u.GetResult(false, decryptionParams.PubKey)
-			task.DecryptionTime = time.Since(start)
-			if err != nil {
-				fmt.Printf("wtf")
-				fmt.Print(err)
-				return
-			}
-			task.Result = result
-			task.logger.Info("task %s Result %s", task.Id, result.String())
-			fmt.Printf("task %s Result %s\n", task.Id, result.String())
-		}
-	}
-
-	c.Status(http.StatusAccepted)
 
 }
 
@@ -427,8 +345,8 @@ func (server *Server) GetEndpoints() []Endpoint {
 		{"POST", "/group", server.createGroupEndpoint},
 		{"GET", "/group/:id", server.getGroupDetailsEndpoint},
 
-		{"GET", "/group/:id/lock", server.lockGroupEndpoint},
-		{"GET", "/group/:id/unlock", server.unlockGroupEndpoint},
+		//{"GET", "/group/:id/lock", server.lockGroupEndpoint},
+		//{"GET", "/group/:id/unlock", server.unlockGroupEndpoint},
 
 		{"POST", "/group/:id/sensor", server.addSensorEndpoint},
 		{"DELETE", "/group/:id/sensor", server.removeSensorEndpoint},
@@ -436,6 +354,9 @@ func (server *Server) GetEndpoints() []Endpoint {
 		{"POST", "/task", server.addTaskEndpoint},
 		{"DELETE", "/task/:id", server.removeTaskEndpoint},
 		{"GET", "/task/:id", server.getTaskDetailsEndpoint},
-		{"POST", "/task/:id/data", server.submitCipherEndpoint},
+		{"POST", "/task/:taskId/:sensorId", server.submitCipherEndpoint},
+
+		{"POST", "/authority", server.setAuthorityEndpoint},
+		{"POST", "/rate", server.addRateEndpoint},
 	}
 }

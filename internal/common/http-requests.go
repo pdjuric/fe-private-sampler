@@ -1,11 +1,5 @@
 package common
 
-import (
-	"fmt"
-	_uuid "github.com/google/uuid"
-	"net"
-)
-
 // todo optional and required parameters in all requests
 
 type RegisterSensorRequest struct {
@@ -13,59 +7,24 @@ type RegisterSensorRequest struct {
 	IP
 }
 
-type SubmitCipherRequest struct {
-	//TaskId   UUID 		`json:"taskId"` // sent through path param
-	SensorId UUID     `json:"sensorId"`
-	BatchIdx int      `json:"batchIdx"`
-	Cipher   FECipher `json:"cipher"`
-}
-
 type CreateTaskRequest struct {
 	GroupId   UUID `json:"groupId"`
 	BatchSize int  `json:"batchSize"` // no need for BatchParams, it can be derived
-	SamplingParams
-	CoefficientsByPeriod []int `json:"coefficientsByPeriod" default:"nil" required:"true"`
+	Start     int  `json:"start"`     // timestamp when server resets for the first time and starts measuring
+	Duration  int  `json:"duration"`
+	RateId    UUID `json:"rateId"`
 }
 
-type SubmitTaskRequest struct {
-	TaskId UUID `json:"id"`
+type CreateAuthorityTaskRequest struct {
+	Id        UUID
+	SensorIds []UUID
 	BatchParams
+	MaxRateValue   int `json:"maxCoeffValue"`
+	MaxSampleValue int `json:"maxSampleValue"`
+}
+
+type SubmitSensorTaskRequest struct {
+	TaskId UUID `json:"id"`
 	SamplingParams
-
-	Schema string // needed for recognizing FEEncryptionParams concrete type
-	FEEncryptionParams
-}
-
-type IP struct {
-	Schema string `json:"schema"`
-	IPv4   net.IP `json:"ipv4"`
-	Port   string `json:"port"`
-}
-
-func (ip IP) String() string {
-	return ip.Schema + "://" + ip.IPv4.String() + ":" + ip.Port
-}
-
-type UUID string
-
-func (uuid UUID) Verify() bool {
-	_, err := _uuid.Parse(string(uuid))
-	return err == nil
-}
-
-func (uuid UUID) IsNil() bool {
-	return string(uuid) == ""
-}
-
-func NewUUID() UUID {
-	return UUID(_uuid.New().String())
-}
-
-func NewUUIDFromString(uuidString string) (UUID, error) {
-	uuid := UUID(uuidString)
-	if !uuid.Verify() {
-		return UUID(""), fmt.Errorf("invalid UUID: %s", uuidString)
-	} else {
-		return uuid, nil
-	}
+	AuthorityIP IP `json:"authorityIP"`
 }

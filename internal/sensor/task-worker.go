@@ -3,6 +3,7 @@ package sensor
 import (
 	. "fe/internal/common"
 	"sync/atomic"
+	"time"
 )
 
 // StartTaskWorker starts taskWorker as Runnable goroutine, for provided task,
@@ -19,6 +20,18 @@ func StartTaskWorker(task *Task) {
 // taskWorker monitors Task's channels, and spawns a new goroutine for appropriate
 func taskWorker(r *Runnable, task *Task) {
 	r.Start()
+
+	encryptionParamsFetched := make(chan bool, 1)
+	// fetch encryption params
+	go func() {
+		for {
+			if ok := task.FetchEncryptionParams(); ok {
+				encryptionParamsFetched <- true
+				return
+			}
+			time.Sleep(10 * time.Second)
+		}
+	}()
 
 	//start Sampler
 	stopSampler := StartSampler(&task.SamplingParams, &task.samplingChan, task.CloseSamplingChan, task.logger)
@@ -66,6 +79,10 @@ func taskWorker(r *Runnable, task *Task) {
 			// in logger, it will still be displayed as TaskWorker
 			// no need for Runnable as it will not be waiting on channels in a loop
 			go func(batchIdx int) {
+				// wait until encryption params are fetched
+				<-encryptionParamsFetched
+				encryptionParamsFetched <- true
+
 				// encrypt the batch
 				ok := task.EncryptBatch(batchIdx)
 				if !ok {

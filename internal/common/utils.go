@@ -21,3 +21,13 @@ func GetIPv4() net.IP {
 func Now() time.Time {
 	return time.Now().Truncate(time.Second)
 }
+
+func GetMaxAndMinValue(array []int) int {
+	max := array[0]
+	for _, coefficient := range array {
+		if coefficient > max {
+			max = coefficient
+		}
+	}
+	return max + 1
+}

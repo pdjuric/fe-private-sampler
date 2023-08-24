@@ -8,7 +8,7 @@ import (
 
 type Sensor struct {
 	Id      UUID `json:"id"`
-	GroupId UUID // sensor can be at most one group -> // todo on the server		//can this be nil
+	GroupId UUID // sensor can be at most one group -> // todo on the server  //can this be nil
 	Server  *Server
 	tasks   sync.Map
 
@@ -23,12 +23,12 @@ func InitSensor() *Sensor {
 	return sensor
 }
 
-func (s *Sensor) AddTask(task *Task) {
-	s.tasks.Store(task.Id, task)
+func (sensor *Sensor) AddTask(task *Task) {
+	sensor.tasks.Store(task.Id, task)
 }
 
-func (s *Sensor) GetTask(taskId UUID) (*Task, error) {
-	taskAny, exists := s.tasks.Load(taskId)
+func (sensor *Sensor) GetTask(taskId UUID) (*Task, error) {
+	taskAny, exists := sensor.tasks.Load(taskId)
 	if !exists {
 		return nil, fmt.Errorf("task %s does not exist", taskId)
 	}

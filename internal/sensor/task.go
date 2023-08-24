@@ -11,7 +11,6 @@ type Task struct {
 	SensorId UUID   `json:"sensorId"`
 	stopFn   func() // stops TaskWorker execution when called
 
-	BatchParams
 	batches []Batch
 
 	// sampling
@@ -21,37 +20,41 @@ type Task struct {
 	addingSampleMutex sync.Mutex // only in case of multiple goroutines calling AddSample
 
 	// encryption
-	schema string
-	FEEncryptionParams
-	encryptedBatchesCnt  atomic.Int32 // atomic, if queried by another goroutine for task status
-	encryptionChan       chan int
-	encryptionChanClosed atomic.Bool
+	encryptor               FEEncryptor
+	encryptionParamsFetched atomic.Bool
+	encryptedBatchesCnt     atomic.Int32 // atomic, if queried by another goroutine for task status
+	encryptionChan          chan int
+	encryptionChanClosed    atomic.Bool
 
 	// submission
 	server              *Server
+	authority           *Authority
 	submittedBatchesCnt atomic.Int32
 
 	logger *Logger
 }
 
-// NewTask creates a new Task from common.SubmitTaskRequest
-func (s *Sensor) NewTask(taskRequest *SubmitTaskRequest) *Task {
+// NewTask creates a new Task from common.SubmitSensorTaskRequest
+func (sensor *Sensor) NewTask(taskRequest *SubmitSensorTaskRequest) *Task {
 	task := &Task{
 		Id:       taskRequest.TaskId,
-		SensorId: s.Id,
+		SensorId: sensor.Id,
 
-		BatchParams: taskRequest.BatchParams,
-		batches:     make([]Batch, taskRequest.BatchCnt),
+		batches: make([]Batch, taskRequest.BatchCnt),
 
 		SamplingParams: taskRequest.SamplingParams,
 		samplingChan:   make(chan int, taskRequest.BatchSize*SensorSamplingChanSizeCoeff),
 
-		schema:             taskRequest.Schema,
-		FEEncryptionParams: taskRequest.FEEncryptionParams,
-		encryptionChan:     make(chan int, taskRequest.BatchCnt*SensorEncryptionChanSizeCoeff),
-		logger:             GetLoggerForFile("", string(taskRequest.TaskId)),
+		encryptionChan: make(chan int, taskRequest.BatchCnt*SensorEncryptionChanSizeCoeff),
+		logger:         GetLoggerForFile("", string(taskRequest.TaskId)),
 
-		server: s.Server,
+		server: sensor.Server,
+		authority: &Authority{
+			RemoteHttpServer: &RemoteHttpServer{
+				IP:     taskRequest.AuthorityIP,
+				Logger: GetLogger("authority", sensor.Logger),
+			},
+		},
 	}
 
 	for idx := 0; idx < taskRequest.BatchCnt; idx++ {
@@ -59,6 +62,7 @@ func (s *Sensor) NewTask(taskRequest *SubmitTaskRequest) *Task {
 	}
 
 	task.logger.Info("task created")
+	sensor.AddTask(task)
 	return task
 }
 
@@ -82,12 +86,15 @@ func (t *Task) AddSample(sample int) {
 func (t *Task) EncryptBatch(batchIdx int) bool {
 	t.logger.Info("encrypting batch no %d", batchIdx)
 
-	err := t.batches[batchIdx].Encrypt(t.schema, t.FEEncryptionParams)
+	batch := &t.batches[batchIdx]
+	cipher, elapsedTime, err := t.encryptor.Encrypt(batch)
 	if err != nil {
 		t.logger.Err(err)
 		t.logger.Info("encryption of batch no %d failed", batchIdx)
 		return false
 	}
+	batch.cipher = cipher
+	batch.encryptionTime = elapsedTime
 	t.encryptedBatchesCnt.Add(1)
 
 	t.logger.Info("encryption of batch no %d successful", batchIdx)
@@ -99,7 +106,7 @@ func (t *Task) SubmitCipher(batchIdx int) bool {
 	t.logger.Info("submitting cipher no %d", batchIdx)
 
 	batch := &t.batches[batchIdx]
-	err := t.server.SubmitCipher(t.Id, t.SensorId, batch.idx, batch.cipher)
+	err := t.server.SubmitCipher(t.Id, t.SensorId, batch.cipher)
 	if err != nil {
 		t.logger.Err(err)
 		t.logger.Info("submission of cipher no %d failed", batchIdx)
@@ -141,4 +148,16 @@ func (t *Task) GetSamples() [][]int32 {
 		samples = append(samples, samplesFromBatch)
 	}
 	return samples
+}
+
+func (t *Task) FetchEncryptionParams() bool {
+	feEncryptionParams, err := t.authority.GetEncryptionParams(t.Id, t.SensorId)
+	if err != nil {
+		t.logger.Err(err)
+		return false
+	}
+
+	t.encryptor = NewFEEncryptor(feEncryptionParams)
+	t.encryptionParamsFetched.Store(true)
+	return true
 }

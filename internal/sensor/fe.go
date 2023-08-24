@@ -2,18 +2,62 @@ package sensor
 
 import (
 	. "fe/internal/common"
+	"github.com/fentec-project/gofe/data"
 	"github.com/fentec-project/gofe/innerprod/fullysec"
-	"math/big"
 	"time"
 )
 
-func SingleFEEncrypt(params *SingleFEEncryptionParams, samples []*big.Int) (*SingleFECipher, time.Duration, error) {
-	// generate schema
-	schema := fullysec.NewFHIPEFromParams(params.Params)
+type FEEncryptor interface {
+	Encrypt(batch *Batch) (FECipher, time.Duration, error)
+}
+
+type SingleFEEncryptor struct {
+	Schema        *fullysec.FHIPE
+	EncryptionKey *fullysec.FHIPESecKey
+
+	//EncryptedFlag     	atomic.Bool
+	//EncryptionTime		time.Duration
+}
+
+type MultiFEEncryptor struct {
+	Schema        *fullysec.FHMultiIPE
+	IdxOffset     int
+	EncryptionKey []data.Matrix
+
+	//BatchEncryptedFlag     []atomic.Bool
+	//EncryptionTimes		 []time.Duration
+}
+
+func NewFEEncryptor(feParams FEEncryptionParams) FEEncryptor {
+	switch feParams.(type) {
+
+	case *SingleFEEncryptionParams:
+		params := feParams.(*SingleFEEncryptionParams)
+		return &SingleFEEncryptor{
+			Schema:        fullysec.NewFHIPEFromParams(params.SchemaParams),
+			EncryptionKey: params.SecKey,
+		}
+
+	case *MultiFEEncryptionParams:
+		params := feParams.(*MultiFEEncryptionParams)
+		return &MultiFEEncryptor{
+			Schema:        fullysec.NewFHMultiIPEFromParams(params.SchemaParams),
+			IdxOffset:     params.IdxOffset,
+			EncryptionKey: params.SecKeys,
+		}
+
+	default:
+		//todo !!!
+		return nil
+	}
+}
+
+func (e *SingleFEEncryptor) Encrypt(batch *Batch) (FECipher, time.Duration, error) {
+	// batchIdx is ignored
 
 	// encrypt + measure time
 	start := time.Now()
-	cipher, err := schema.Encrypt(samples, params.SecKey)
+	cipher, err := e.Schema.Encrypt(batch.samples, e.EncryptionKey)
 	encryptionTime := time.Since(start)
 	if err != nil {
 		return nil, encryptionTime, err
@@ -22,17 +66,19 @@ func SingleFEEncrypt(params *SingleFEEncryptionParams, samples []*big.Int) (*Sin
 	return cipher, encryptionTime, nil
 }
 
-func MultiFEEncrypt(batchIdx int, params *MultiFEEncryptionParams, samples []*big.Int) (*MultiFECipher, time.Duration, error) {
-	// generate schema
-	schema := fullysec.NewFHMultiIPEFromParams(&params.Params)
+func (e *MultiFEEncryptor) Encrypt(batch *Batch) (FECipher, time.Duration, error) {
+	// todo check batchIdx bound!
 
 	// encrypt + measure time
 	start := time.Now()
-	cipher, err := schema.Encrypt(samples, params.SecKeys[batchIdx])
+	cipher, err := e.Schema.Encrypt(batch.samples, e.EncryptionKey[batch.idx])
 	encryptionTime := time.Since(start)
 	if err != nil {
 		return nil, encryptionTime, err
 	}
 
-	return &cipher, encryptionTime, nil
+	return &MultiFECipher{
+		Idx:     batch.idx + e.IdxOffset,
+		Payload: cipher,
+	}, encryptionTime, nil
 }

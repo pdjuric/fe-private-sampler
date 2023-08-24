@@ -11,6 +11,7 @@ type Server struct {
 	sensors sync.Map
 	tasks   sync.Map
 
+	Authority *Authority
 	*Host[Task]
 }
 
@@ -18,6 +19,10 @@ func InitServer() *Server {
 	server := &Server{}
 	server.Host = InitHost[Task](ServerLogDir, ServerLogFilename, ServerTaskDaemonChanSize, server.GetEndpoints())
 	return server
+}
+
+func (server *Server) IsAuthoritySet() bool {
+	return server.Authority != nil
 }
 
 func (server *Server) GetGroup(uuid UUID) (*Group, error) {

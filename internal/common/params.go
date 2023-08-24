@@ -1,6 +1,7 @@
 package common
 
 import (
+	"github.com/fentec-project/bn256"
 	"github.com/fentec-project/gofe/data"
 	"github.com/fentec-project/gofe/innerprod/fullysec"
 )
@@ -8,7 +9,7 @@ import (
 type SamplingParams struct {
 	Start          int `json:"start"` // timestamp when server resets for the first time and starts measuring
 	SamplingPeriod int `json:"samplingPeriod"`
-	SampleCount    int `json:"sampleCount"` // must be MeasuringCount % SubmissionPeriod == 0
+	BatchParams
 	MaxSampleValue int `json:"maxSampleValue"`
 }
 
@@ -19,20 +20,11 @@ type BatchParams struct {
 
 //region FE
 
-// region Encryption
+//region FESchemaParams
 
-type FEEncryptionParams interface {
-}
-
-type SingleFEEncryptionParams struct {
-	SecKey *fullysec.FHIPESecKey `json:"secKey"`
-	Params *fullysec.FHIPEParams `json:"params"`
-}
-
-type MultiFEEncryptionParams struct {
-	SecKeys []data.Matrix             `json:"secKeys"`
-	Params  fullysec.FHMultiIPEParams `json:"params"`
-}
+type FESchemaParams any
+type SingleFESchemaParams = fullysec.FHIPEParams
+type MultiFESchemaParams = fullysec.FHMultiIPEParams
 
 //endregion
 
@@ -40,7 +32,42 @@ type MultiFEEncryptionParams struct {
 
 type FECipher = any
 type SingleFECipher = fullysec.FHIPECipher
-type MultiFECipher = data.VectorG1
+type MultiFECipher struct {
+	Idx     int
+	Payload data.VectorG1
+}
+
+//endregion
+
+// region Encryption
+
+type FEEncryptionParams any
+
+type SingleFEEncryptionParams struct {
+	SecKey       *fullysec.FHIPESecKey `json:"secKey"`
+	SchemaParams *SingleFESchemaParams `json:"params"`
+}
+
+type MultiFEEncryptionParams struct {
+	IdxOffset    int                  `json:"idxOffset"`
+	SecKeys      []data.Matrix        `json:"secKeys"`
+	SchemaParams *MultiFESchemaParams `json:"params"`
+}
+
+//endregion
+
+//region Decryption
+
+type FEDecryptionParams any
+
+type SingleFEDecryptionParams struct {
+	DecryptionKey fullysec.FHIPEDerivedKey
+}
+
+type MultiFEDecryptionParams struct {
+	PubKey        *bn256.GT
+	DecryptionKey data.MatrixG2
+}
 
 //endregion
 
