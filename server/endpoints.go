@@ -1,7 +1,7 @@
 package server
 
 import (
-	. "fe/internal/common"
+	. "fe/common"
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"net/http"

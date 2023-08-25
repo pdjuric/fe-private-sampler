@@ -1,7 +1,7 @@
 package sensor
 
 import (
-	. "fe/internal/common"
+	. "fe/common"
 )
 
 type Authority struct {

@@ -1,7 +1,7 @@
 package server
 
 import (
-	. "fe/internal/common"
+	. "fe/common"
 	"fmt"
 	"math/big"
 	"net/http"

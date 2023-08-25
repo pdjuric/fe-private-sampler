@@ -2,7 +2,7 @@ package sensor
 
 import (
 	"encoding/json"
-	. "fe/internal/common"
+	. "fe/common"
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"net/http"

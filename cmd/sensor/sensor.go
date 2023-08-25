@@ -1,8 +1,8 @@
 package main
 
 import (
-	. "fe/internal/common"
-	. "fe/internal/sensor"
+	. "fe/common"
+	. "fe/sensor"
 	"fmt"
 	"net"
 	"os"

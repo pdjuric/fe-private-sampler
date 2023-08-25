@@ -1,7 +1,7 @@
 package sensor
 
 import (
-	. "fe/internal/common"
+	. "fe/common"
 	"github.com/fentec-project/gofe/data"
 	"github.com/fentec-project/gofe/innerprod/fullysec"
 	"time"

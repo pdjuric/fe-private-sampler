@@ -1,8 +1,8 @@
 package main
 
 import (
-	. "fe/internal/common"
-	. "fe/internal/server"
+	. "fe/common"
+	. "fe/server"
 	"fmt"
 )
 

@@ -2,7 +2,7 @@ package server
 
 import (
 	"encoding/json"
-	. "fe/internal/common"
+	. "fe/common"
 	"fmt"
 	"net/http"
 )

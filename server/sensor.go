@@ -1,7 +1,7 @@
 package server
 
 import (
-	. "fe/internal/common"
+	. "fe/common"
 )
 
 type Sensor struct {

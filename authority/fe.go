@@ -1,7 +1,7 @@
 package authority
 
 import (
-	. "fe/internal/common"
+	. "fe/common"
 	"fmt"
 	"github.com/fentec-project/bn256"
 	"github.com/fentec-project/gofe/data"

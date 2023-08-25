@@ -1,7 +1,7 @@
 package server
 
 import (
-	. "fe/internal/common"
+	. "fe/common"
 	"github.com/fentec-project/gofe/sample"
 	"math/big"
 	"sync"

@@ -1,8 +1,8 @@
 package main
 
 import (
-	. "fe/internal/authority"
-	. "fe/internal/common"
+	. "fe/authority"
+	. "fe/common"
 	"fmt"
 )
 
