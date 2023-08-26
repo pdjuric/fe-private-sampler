@@ -4,6 +4,7 @@ import (
 	"github.com/fentec-project/bn256"
 	"github.com/fentec-project/gofe/data"
 	"github.com/fentec-project/gofe/innerprod/fullysec"
+	"math/big"
 )
 
 type SamplingParams struct {
@@ -30,11 +31,16 @@ type MultiFESchemaParams = fullysec.FHMultiIPEParams
 
 //region Cipher
 
-type FECipher = any
+type FECipher any
 type SingleFECipher = fullysec.FHIPECipher
 type MultiFECipher struct {
 	Idx     int
 	Payload data.VectorG1
+}
+
+type DummyCipher struct {
+	Idx     int
+	Samples []*big.Int
 }
 
 //endregion
@@ -54,6 +60,10 @@ type MultiFEEncryptionParams struct {
 	SchemaParams *MultiFESchemaParams `json:"params"`
 }
 
+type DummyEncryptionParams struct {
+	IdxOffset int `json:"idxOffset"`
+}
+
 //endregion
 
 //region Decryption
@@ -61,12 +71,19 @@ type MultiFEEncryptionParams struct {
 type FEDecryptionParams any
 
 type SingleFEDecryptionParams struct {
+	SchemaParams  SingleFESchemaParams
 	DecryptionKey fullysec.FHIPEDerivedKey
 }
 
 type MultiFEDecryptionParams struct {
+	SchemaParams  MultiFESchemaParams
 	PubKey        *bn256.GT
 	DecryptionKey data.MatrixG2
+}
+
+type DummyDecryptionParams struct {
+	BatchCnt int
+	Rates    [][]*big.Int
 }
 
 //endregion

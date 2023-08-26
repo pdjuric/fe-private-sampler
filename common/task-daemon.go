@@ -1,6 +1,6 @@
 package common
 
-// TaskDaemon accepts Tasks from taskChan and spawns taskWorker for that task
+// TaskDaemon accepts Tasks from taskChan and starts a taskWorker for that task
 func TaskDaemon[TaskT any](r *Runnable, taskChan *chan *TaskT, startTaskWorkerFn func(task *TaskT)) {
 	r.Start()
 

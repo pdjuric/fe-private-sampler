@@ -16,7 +16,7 @@ func ServerMain() {
 	}
 
 	ip := IP{
-		Schema: "http",
+		Scheme: "http",
 		IPv4:   GetIPv4(),
 		Port:   "8080",
 	}

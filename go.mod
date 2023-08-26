@@ -10,7 +10,7 @@ require (
 	github.com/sirupsen/logrus v1.9.3
 )
 
-replace github.com/fentec-project/gofe => github.com/pdjuric/gofe v0.0.0-20230812110950-375013c72423
+replace github.com/fentec-project/gofe => github.com/pdjuric/gofe v0.0.0-20230826123816-3fd64f1b834e
 
 require (
 	github.com/bytedance/sonic v1.9.1 // indirect

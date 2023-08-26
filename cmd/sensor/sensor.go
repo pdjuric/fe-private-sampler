@@ -31,7 +31,7 @@ func SensorMain() {
 	fmt.Printf("sensor started with args: %s \n", args)
 
 	ip := IP{
-		Schema: args[2],
+		Scheme: args[2],
 		IPv4:   net.ParseIP(args[0]),
 		Port:   args[1],
 	}

@@ -20,14 +20,15 @@ func (server *Server) NewAuthority(ip IP) *Authority {
 	}
 }
 
-func (a *Authority) GenerateFESchemaParams(taskId UUID, sensorIds []UUID, batchParams BatchParams, MaxRateValue int, MaxSampleValue int) (FESchemaParams, error) {
+func (a *Authority) SubmitTask(taskId UUID, sensorIds []UUID, batchParams BatchParams, MaxTariffValue int, MaxSampleValue int, EnableEncryption bool) error {
 	url := "/task"
-	body := CreateAuthorityTaskRequest{
-		Id:             taskId,
-		SensorIds:      sensorIds,
-		BatchParams:    batchParams,
-		MaxRateValue:   MaxRateValue,
-		MaxSampleValue: MaxSampleValue,
+	body := AuthorityTaskRequest{
+		Id:               taskId,
+		SensorIds:        sensorIds,
+		BatchParams:      batchParams,
+		MaxTariffValue:   MaxTariffValue,
+		MaxSampleValue:   MaxSampleValue,
+		EnableEncryption: EnableEncryption,
 	}
 
 	statusCode, responseBody, _ := a.POST(url, body, BodyJSON)
@@ -35,19 +36,15 @@ func (a *Authority) GenerateFESchemaParams(taskId UUID, sensorIds []UUID, batchP
 		var kvMap map[string]string
 		_ = json.Unmarshal(responseBody, &kvMap)
 
-		return nil, fmt.Errorf(kvMap["error"])
+		return fmt.Errorf(kvMap["error"])
 	}
 
-	data, err := Decode(responseBody)
-	if err != nil {
-		return nil, err
-	}
-	return data, nil
+	return nil
 }
 
-func (a *Authority) SendCoefficients(taskId UUID, coeffs []int) (UUID, error) {
-	url := "/decryption/" + string(taskId)
-	data, err := Encode(coeffs)
+func (a *Authority) SendRates(taskId UUID, rates []int) (UUID, error) {
+	url := "/rates/" + string(taskId)
+	data, err := Encode(rates)
 	if err != nil {
 		return "", err
 	}
@@ -60,6 +57,23 @@ func (a *Authority) SendCoefficients(taskId UUID, coeffs []int) (UUID, error) {
 	}
 
 	return decryptionParamsId, nil
+}
+
+func (a *Authority) FetchSchemaParamsStatus(taskId UUID) (*string, error) {
+	url := "/schema-status/" + string(taskId)
+	statusCode, responseBody, err := a.GET(url)
+	if err != nil {
+		return nil, err
+	}
+
+	if statusCode != http.StatusOK {
+		a.Logger.Err(fmt.Errorf("status code: %d, expected %d", statusCode, http.StatusOK))
+		return nil, fmt.Errorf("status code: %d", statusCode)
+	}
+
+	status := string(responseBody)
+
+	return &status, nil
 }
 
 func (a *Authority) FetchDecryptionParamsStatus(taskId UUID, decryptionParamsId UUID) (*string, error) {

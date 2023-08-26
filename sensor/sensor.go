@@ -7,10 +7,10 @@ import (
 )
 
 type Sensor struct {
-	Id      UUID `json:"id"`
-	GroupId UUID // sensor can be at most one group -> // todo on the server  //can this be nil
-	Server  *Server
-	tasks   sync.Map
+	Id         UUID `json:"id"`
+	CustomerId UUID // todo can this be nil on the server?
+	Server     *Server
+	tasks      sync.Map
 
 	*Host[Task]
 }

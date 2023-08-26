@@ -14,7 +14,7 @@ type Authority struct {
 
 func InitAuthority() *Authority {
 	authority := &Authority{}
-	authority.Host = InitHost[Task](SensorLogDir, SensorLogFilename, SensorTaskChanSize, authority.GetEndpoints())
+	authority.Host = InitHost[Task](AuthorityLogDir, AuthorityLogFilename, SensorTaskChanSize, authority.GetEndpoints())
 	return authority
 }
 

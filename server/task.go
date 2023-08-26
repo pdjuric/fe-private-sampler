@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	. "fe/common"
 	"fmt"
 	"math/big"
@@ -17,50 +18,60 @@ type Task struct {
 	Authority *Authority
 
 	// creation parameters
-	GroupId UUID
+	CustomerId UUID
 	SamplingParams
 
-	Rate *Rate
+	Tariff *Tariff
+	Rates  []int
 
-	DecryptionParamsId   UUID
-	CoefficientsByPeriod []int
-	feDecryptor          FEDecryptor
+	DecryptionParamsId UUID
+
+	EncryptionEnabled bool
+	feDecryptor       FEDecryptor
 
 	Result *big.Int
 
-	// status
-	SubmittedTaskFlags  []atomic.Bool
-	SubmittedCipherCnts []atomic.Int32
-	CoeffsSubmittedCnt  atomic.Int32
-	KeyDerivedStatus    atomic.Bool
-	keyDerivedChan      chan bool // when the key is derived, this channel will be closed
-	logger              *Logger
+	// status flags
+	schemaParamsFetched     atomic.Bool
+	submittedToSensors      []atomic.Bool
+	ratesSubmittedCnt       atomic.Int32
+	decryptionParamsFetched atomic.Bool
+	ciphersReceived         atomic.Int32
+	// total ciphers?
+
+	decryptionParamsFetchedChan chan bool // when the key is derived, this channel will be closed
+
+	logger *Logger
 }
 
-// NewTask creates a new Task from common.CreateTaskRequest
-func (server *Server) NewTask(taskRequest CreateTaskRequest) *Task {
+// NewTask creates a new Task from common.ServerTaskRequest
+func (server *Server) NewTask(taskRequest ServerTaskRequest) *Task {
 	id := NewUUID()
-	rate, _ := GetRate(taskRequest.RateId)
-	return &Task{
-		Id:        id,
-		Status:    "created",
-		GroupId:   taskRequest.GroupId,
-		Authority: server.Authority,
+	tariff, _ := GetTariff(taskRequest.TariffId)
+	task := &Task{
+		Id:         id,
+		Status:     "created",
+		CustomerId: taskRequest.CustomerId,
+		Authority:  server.Authority,
 
 		SamplingParams: SamplingParams{
 			Start:          taskRequest.Start,
-			SamplingPeriod: rate.SamplingPeriod,
+			SamplingPeriod: tariff.SamplingPeriod,
 			BatchParams: BatchParams{
-				BatchSize: rate.BatchSize,
-				BatchCnt:  taskRequest.Duration / (rate.SamplingPeriod * rate.BatchSize), // this is number of batches per sensor !!
+				BatchSize: tariff.BatchSize,
+				BatchCnt:  taskRequest.Duration / (tariff.SamplingPeriod * tariff.BatchSize), // this is number of batches per sensor !!
 			},
-			MaxSampleValue: rate.MaxSampleValue,
+			MaxSampleValue: tariff.MaxSampleValue,
 		},
+		EncryptionEnabled: taskRequest.EnableEncryption,
 
-		keyDerivedChan: make(chan bool, 1),
-		Rate:           rate,
-		logger:         GetLoggerForFile("", string(id)),
+		decryptionParamsFetchedChan: make(chan bool, 1),
+		Tariff:                      tariff,
+		logger:                      GetLoggerForFile("", string(id)),
 	}
+	taskRequestJson, _ := json.MarshalIndent(taskRequest, "", "  ")
+	task.logger.Info("Task params: %s", string(taskRequestJson))
+	return task
 }
 
 func (t *Task) getSensorIdx(sensorId UUID) (int, error) {
@@ -72,22 +83,21 @@ func (t *Task) getSensorIdx(sensorId UUID) (int, error) {
 	return -1, fmt.Errorf("sensor %s not found in task %s", sensorId, t.Id)
 }
 
-// SetSensors sets Sensors (from provided Group) for Task, and calculates vectorLen and vectorCnt for the Task based on the number of  samplesPerSubmission
-func (t *Task) SetSensors(g *Group) error {
+// SetSensors sets Sensors (from provided Customer) for Task, and calculates vectorLen and vectorCnt for the Task based on the number of  samplesPerSubmission
+func (t *Task) SetSensors(g *Customer) error {
 	g.mutex.RLock()
 	defer g.mutex.RUnlock()
 
 	// check if there are any sensors at all
 	if len(g.Sensors) == 0 {
-		err := fmt.Errorf("no sensors in group %s; tasks can be created for groups with at least one server", g.Uuid)
+		err := fmt.Errorf("no sensors in customer %s; tasks can be created for customers with at least one server", g.Uuid)
 		t.logger.Err(err)
 		return err
 	}
 
 	sensorCnt := len(g.Sensors)
 	t.logger.Info("setting sensors for task %s", t.Id)
-	t.SubmittedTaskFlags = make([]atomic.Bool, sensorCnt)
-	t.SubmittedCipherCnts = make([]atomic.Int32, sensorCnt)
+	t.submittedToSensors = make([]atomic.Bool, sensorCnt)
 	t.Sensors = make([]*Sensor, sensorCnt)
 	copy(t.Sensors, g.Sensors)
 
@@ -95,7 +105,7 @@ func (t *Task) SetSensors(g *Group) error {
 	return nil
 }
 
-// Submit sends the SubmitSensorTaskRequest to all Sensors in the Task's Group (captured during SetSensors)
+// SubmitToSensors sends the SensorTaskRequest to all Sensors in the Task's Customer (captured during SetSensors)
 func (t *Task) SubmitToSensors() bool {
 	// todo add parallel execution
 	for idx, sensor := range t.Sensors {
@@ -115,7 +125,7 @@ func (t *Task) SubmitToSensors() bool {
 			return false
 		}
 
-		t.SubmittedTaskFlags[idx].Store(true)
+		t.submittedToSensors[idx].Store(true)
 		t.logger.Info("task submitted to sensor %s", sensor.Id)
 		// todo check whether start time has already passed
 	}
@@ -128,74 +138,108 @@ func (t *Task) GetFESchemaParams() bool {
 		sensorIds[idx] = sensor.Id
 	}
 
-	feSchemaParams, err := t.Authority.GenerateFESchemaParams(t.Id, sensorIds, t.BatchParams, t.Rate.MaxRateValue, t.MaxSampleValue)
+	t.logger.Info("submitting task to authority")
+	err := t.Authority.SubmitTask(t.Id, sensorIds, t.BatchParams, t.Tariff.MaxTariffValue, t.MaxSampleValue, t.EncryptionEnabled)
 	if err != nil {
 		t.logger.Err(err)
 		return false
 	}
 
-	t.feDecryptor, err = NewFEDecryptor(feSchemaParams)
-	return true
-}
-
-func (t *Task) DeriveDecryptionKey() {
-	t.SendCoeffs()
 	for {
-		time.Sleep(DecryptionParamsPollingInterval)
-		status, err := t.Authority.FetchDecryptionParamsStatus(t.Id, t.DecryptionParamsId)
+		time.Sleep(SchemaParamsPollingInterval)
+		status, err := t.Authority.FetchSchemaParamsStatus(t.Id)
 		*status = strings.Replace(*status, "\"", "", -1)
 		switch *status {
 		case StatusCreated:
+			t.logger.Info("fe params not yet ready, polling again in %d ns", SchemaParamsPollingInterval.Nanoseconds())
+			continue
+		case StatusError, StatusInvalid:
+			t.logger.Err(err)
+			return false
+		case StatusReady:
+			t.schemaParamsFetched.Store(true)
+			t.logger.Info("fe params ready")
+			return true
+		}
+	}
+}
+
+func (t *Task) DeriveDecryptionKey() {
+	var decryptionParamsId UUID
+	decryptionParamsId, ok := t.SendRates()
+	if !ok {
+		return
+	}
+
+	for {
+		time.Sleep(DecryptionParamsPollingInterval)
+		status, err := t.Authority.FetchDecryptionParamsStatus(t.Id, decryptionParamsId)
+		*status = strings.Replace(*status, "\"", "", -1)
+		switch *status {
+		case StatusCreated:
+			t.logger.Info("fe decryption params not yet ready, polling again in %d ns", DecryptionParamsPollingInterval.Nanoseconds())
 			continue
 		case StatusError:
 			t.logger.Err(err)
 			return
 		case StatusReady:
-			decryptionParams, err := t.Authority.FetchDecryptionParams(t.Id, t.DecryptionParamsId)
+			t.logger.Info("fe decryption params ready")
+			t.logger.Info("fetching fe decryption params")
+			decryptionParams, err := t.Authority.FetchDecryptionParams(t.Id, decryptionParamsId)
 			if err != nil {
 				t.logger.Err(err)
 				return
 			}
 
-			t.feDecryptor.SetDecryptionParams(decryptionParams)
+			t.feDecryptor, err = NewFEDecryptor(decryptionParams, t.logger)
+			if err != nil {
+				t.logger.Err(err)
+				return
+			}
 
-			t.KeyDerivedStatus.Store(true)
-			close(t.keyDerivedChan)
+			t.decryptionParamsFetched.Store(true)
+			close(t.decryptionParamsFetchedChan)
+			t.logger.Info("fe decryption params fetched")
 			return
 		case StatusInvalid:
-			t.SendCoeffs()
+			t.logger.Info("rates invalid, regenerating")
+			decryptionParamsId, ok = t.SendRates()
 		}
 	}
 }
 
-func (t *Task) SendCoeffs() bool {
-	coeffs, err := t.Rate.GenerateCoefficients(len(t.Sensors) * t.BatchCnt)
+func (t *Task) SendRates() (UUID, bool) {
+	rates, err := t.Tariff.GenerateRates(t.BatchCnt)
 	if err != nil {
 		t.logger.Err(err)
-		return false
+		return "", false
 	}
 
-	decryptionParamsId, err := t.Authority.SendCoefficients(t.Id, coeffs)
+	t.logger.Debug("generated rates: %v", rates)
+	t.logger.Info("sending rates")
+	decryptionParamsId, err := t.Authority.SendRates(t.Id, rates)
 	if err != nil {
 		t.logger.Err(err)
-		return false
+		t.logger.Error("sending rates failed")
+		return "", false
 	}
 	// todo handle error
 
-	t.DecryptionParamsId = decryptionParamsId
-	t.CoeffsSubmittedCnt.Add(1)
-	return true
+	t.logger.Info("rates sent successfully")
+	t.ratesSubmittedCnt.Add(1)
+	return decryptionParamsId, true
 }
 
 // potentially blocking method, should be done in goroutine
 func (t *Task) AddCipher(feCipher FECipher) {
-	_, opened := <-t.keyDerivedChan
+	_, opened := <-t.decryptionParamsFetchedChan
 
 	if opened {
 		t.logger.Err(fmt.Errorf("key derived channel nas NOT closed"))
 		return
 	}
 
+	t.logger.Info("adding cipher")
 	result, err := t.feDecryptor.AddCipher(feCipher)
 	if err != nil {
 		t.logger.Err(err)
@@ -203,6 +247,6 @@ func (t *Task) AddCipher(feCipher FECipher) {
 
 	if result != nil {
 		t.Result = result
-		fmt.Printf(result.String())
+		t.logger.Debug("result: %d", result)
 	}
 }

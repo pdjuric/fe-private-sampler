@@ -10,6 +10,7 @@ type Server struct {
 	*RemoteHttpServer
 }
 
+// NewServer creates new remote server with the remote IP address.
 func (sensor *Sensor) NewServer(ip IP) *Server {
 	return &Server{
 		RemoteHttpServer: &RemoteHttpServer{
@@ -19,9 +20,10 @@ func (sensor *Sensor) NewServer(ip IP) *Server {
 	}
 }
 
+// Register registers the sensor to the server.
 func (s *Server) Register(sensor *Sensor) {
 	//method := "POST"
-	url := "/group/" + string(sensor.GroupId) + "/sensor"
+	url := "/customer/" + string(sensor.CustomerId) + "/sensor"
 	body := RegisterSensorRequest{
 		SensorId: sensor.Id,
 		IP:       *sensor.IP,
@@ -37,6 +39,7 @@ func (s *Server) Register(sensor *Sensor) {
 
 }
 
+// SubmitCipher sends encrypted data to the server.
 func (s *Server) SubmitCipher(taskId UUID, sensorId UUID, cipher FECipher) error {
 	//method := "POST"
 	url := "/task/" + string(taskId) + "/" + string(sensorId)

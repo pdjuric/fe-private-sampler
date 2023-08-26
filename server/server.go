@@ -7,9 +7,9 @@ import (
 )
 
 type Server struct {
-	groups  sync.Map
-	sensors sync.Map
-	tasks   sync.Map
+	customers sync.Map
+	sensors   sync.Map
+	tasks     sync.Map
 
 	Authority *Authority
 	*Host[Task]
@@ -25,23 +25,23 @@ func (server *Server) IsAuthoritySet() bool {
 	return server.Authority != nil
 }
 
-func (server *Server) GetGroup(uuid UUID) (*Group, error) {
-	group, exists := server.groups.Load(uuid)
+func (server *Server) GetCustomer(uuid UUID) (*Customer, error) {
+	customer, exists := server.customers.Load(uuid)
 	if !exists {
-		return nil, fmt.Errorf("group with id %s not found", uuid)
+		return nil, fmt.Errorf("customer with id %s not found", uuid)
 	}
 
-	return group.(*Group), nil
+	return customer.(*Customer), nil
 }
 
-func (server *Server) AddSensorToGroup(uuid UUID, ip IP, group *Group) {
+func (server *Server) AddSensorToCustomer(uuid UUID, ip IP, customer *Customer) {
 	sensor, exists := server.sensors.Load(uuid)
 	if !exists {
 		sensor = server.NewSensor(uuid, ip)
 		server.sensors.Store(uuid, sensor)
 	}
 
-	group.AddSensor(sensor.(*Sensor))
+	customer.AddSensor(sensor.(*Sensor))
 }
 
 func (server *Server) AddTask(task *Task) {

@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// StartTaskWorker starts taskWorker as Runnable goroutine, for provided task,
+// StartTaskWorker starts taskWorker as a Runnable goroutine, for provided task,
 // and it populates Task.stopFn with function that stops the taskWorker
 func StartTaskWorker(task *Task) {
 	taskWorkerHandle := NewRunnable("task worker", task.logger)
@@ -15,9 +15,7 @@ func StartTaskWorker(task *Task) {
 	return
 }
 
-//todo decription
-
-// taskWorker monitors Task's channels, and spawns a new goroutine for appropriate
+// taskWorker collects the sampled data, groups it into batches, encrypts batches and submits cyphers to the server.
 func taskWorker(r *Runnable, task *Task) {
 	r.Start()
 
@@ -29,25 +27,25 @@ func taskWorker(r *Runnable, task *Task) {
 				encryptionParamsFetched <- true
 				return
 			}
-			time.Sleep(10 * time.Second)
+			time.Sleep(EncryptionParamsPollingInterval)
 		}
 	}()
 
-	//start Sampler
+	// start sampling
 	stopSampler := StartSampler(&task.SamplingParams, &task.samplingChan, task.CloseSamplingChan, task.logger)
 
-	// do not close these channel, close them through task
-	samplingChan := task.samplingChan
-	encryptionChan := task.encryptionChan
+	// do not close these channels, close them through task
+	samplingChan := task.samplingChan     // chan to wait on for new samples
+	encryptionChan := task.encryptionChan // chan to wait on for encrypted batches
 
-	// http request rate limiting, and cancelling
-	rateLimiter := make(chan bool, SensorMaxParallelSubmitBatches)
-	for i := 0; i < SensorMaxParallelSubmitBatches; i++ {
+	// http request rate limiting and cancelling
+	rateLimiter := make(chan bool, MaxParallelSubmissionsPerSensor)
+	for i := 0; i < MaxParallelSubmissionsPerSensor; i++ {
 		rateLimiter <- true
 	}
 
-	// http request cancelling in case of stopping task daemon
-	cancelSubmission := make(chan bool, SensorMaxParallelSubmitBatches)
+	// http request cancelling in case the task daemon has been stopped
+	cancelSubmission := make(chan bool, MaxParallelSubmissionsPerSensor)
 	var submissionCancelled atomic.Bool
 	submissionCancelled.Store(false)
 
@@ -104,38 +102,29 @@ func taskWorker(r *Runnable, task *Task) {
 						rateLimiter <- true
 					}
 				case <-cancelSubmission:
-					// todo cancel submission
 					cancelSubmission <- true
 				}
 
 			}(idx)
 
 		case <-r.ExitChan:
-			//todo drain chans ?
-
 			// CRITICAL -> setting encryptionChan to nil so as fewer batches as possible start encryption
 			encryptionChan = nil
 
 			stopSampler()              // if sampler isn't done, this will stop it, and make it close its chan
 			task.CloseEncryptionChan() // already closed if task.AddSample() is called for all task.sampleCnt samples
 
-			// fixme no way to stop goroutines that are already encrypting and submitting batches
-			cancelling := false
-			if cancelling {
-				submissionCancelled.Store(true)
-				for i := 0; i < SensorMaxParallelSubmitBatches; i++ {
-					cancelSubmission <- true
-				}
+			submissionCancelled.Store(true)
+			for i := 0; i < MaxParallelSubmissionsPerSensor; i++ {
+				cancelSubmission <- true
 			}
 
 			// task may be completed, stopped(cancelled), or failed
-			// todo handle these cases, set status
+			// todo set task status
 			task.cleanup()
 			r.Close()
 			return
 		}
-
-		// todo if stopped, avoid entering cases
 
 	}
 

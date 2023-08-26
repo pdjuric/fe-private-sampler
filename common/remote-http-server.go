@@ -13,24 +13,23 @@ type RemoteHttpServer struct {
 	Logger *Logger
 }
 
-// POST ; url should not include schema, ip address and port
-func (httpClient *RemoteHttpServer) POST(url string, body any, contentType string) (int, []byte, error) {
+// POST sends a POST http request to a remote http server; url should not include schema, ip address and port
+func (httpClient *RemoteHttpServer) POST(path string, body any, contentType string) (int, []byte, error) {
 	if contentType == BodyJSON {
 		body, _ = json.Marshal(body)
-		httpClient.Logger.Info("POST %s body: %s", httpClient.IP.String()+url, body)
+		httpClient.Logger.Info("POST %s body: %s", httpClient.IP.String()+path, body)
 	} else if contentType != BodyOctetStream {
-		panic("ergkjne")
+		panic("POST content type is neither json nor octet-stream.")
 	}
 
 	// Create a request with the payload
-	req, err := http.NewRequest("POST", httpClient.IP.String()+url, bytes.NewBuffer(body.([]byte)))
+	req, err := http.NewRequest("POST", httpClient.IP.String()+path, bytes.NewBuffer(body.([]byte)))
 	if err != nil {
 		httpClient.Logger.Error("error during creating request: %s", err)
 		return 0, nil, fmt.Errorf("error during creating http request")
 	}
 
 	if contentType == "json" {
-
 		req.Header.Set("Content-Type", "application/json")
 	}
 
@@ -49,16 +48,16 @@ func (httpClient *RemoteHttpServer) POST(url string, body any, contentType strin
 		return statusCode, nil, fmt.Errorf("error during reading http response")
 	}
 
-	httpClient.Logger.Info("POST %s -> %d %s ", httpClient.IP.String()+url, statusCode, string(responseBody))
+	httpClient.Logger.Info("POST %s -> %d %s ", httpClient.IP.String()+path, statusCode, string(responseBody))
 	return statusCode, responseBody, nil
 }
 
-// GET ; url should not include schema, ip address and port
-func (httpClient *RemoteHttpServer) GET(url string) (int, []byte, error) {
-	httpClient.Logger.Info("GET %s", httpClient.IP.String()+url)
+// GET sends a GET http request to a remote http server; url should not include schema, ip address and port
+func (httpClient *RemoteHttpServer) GET(path string) (int, []byte, error) {
+	httpClient.Logger.Info("GET %s", httpClient.IP.String()+path)
 
 	// Create a request with the payload
-	req, err := http.NewRequest("GET", httpClient.IP.String()+url, nil)
+	req, err := http.NewRequest("GET", httpClient.IP.String()+path, nil)
 	if err != nil {
 		httpClient.Logger.Error("error during creating request: %s", err)
 		return 0, nil, fmt.Errorf("error during creating http request")
@@ -79,7 +78,10 @@ func (httpClient *RemoteHttpServer) GET(url string) (int, []byte, error) {
 		return statusCode, nil, fmt.Errorf("error during reading http response")
 	}
 
-	httpClient.Logger.Info("GET %s -> %d %s ", httpClient.IP.String()+url, statusCode, string(responseBody))
+	if resp.Header.Get("Content-Type") != string(DataResponse) {
+		httpClient.Logger.Info("GET %s -> %d %s ", httpClient.IP.String()+path, statusCode, string(responseBody))
+	}
+
 	return statusCode, responseBody, nil
 }
 

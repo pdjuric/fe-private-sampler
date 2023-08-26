@@ -27,7 +27,8 @@ func (b *Batch) InitBatch(idx int, samplesCnt int) {
 	b.totalSamplesCnt = int32(samplesCnt)
 }
 
-// AddSample adds a sample to the batch and returns true if the batch is full
+// AddSample adds a sample to the non-full batch and returns true if the batch is full. Adding to the full batch
+// will throw an error.
 func (b *Batch) AddSample(sample int) bool {
 	newSampleIdx := b.receivedSamplesCnt.Add(1) - 1
 	b.samples[newSampleIdx] = big.NewInt(int64(sample))

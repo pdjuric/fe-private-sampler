@@ -1,29 +1,28 @@
 package common
 
-// todo optional and required parameters in all requests
-
 type RegisterSensorRequest struct {
 	SensorId UUID `json:"sensorId"`
 	IP
 }
 
-type CreateTaskRequest struct {
-	GroupId   UUID `json:"groupId"`
-	BatchSize int  `json:"batchSize"` // no need for BatchParams, it can be derived
-	Start     int  `json:"start"`     // timestamp when server resets for the first time and starts measuring
-	Duration  int  `json:"duration"`
-	RateId    UUID `json:"rateId"`
+type ServerTaskRequest struct {
+	CustomerId       UUID `json:"customerId"`
+	Start            int  `json:"start"` // timestamp when server resets for the first time and starts measuring
+	Duration         int  `json:"duration"`
+	TariffId         UUID `json:"tariffId"`
+	EnableEncryption bool `json:"enableEncryption"`
 }
 
-type CreateAuthorityTaskRequest struct {
+type AuthorityTaskRequest struct {
 	Id        UUID
 	SensorIds []UUID
 	BatchParams
-	MaxRateValue   int `json:"maxCoeffValue"`
-	MaxSampleValue int `json:"maxSampleValue"`
+	MaxTariffValue   int  `json:"maxRateValue"`
+	MaxSampleValue   int  `json:"maxSampleValue"`
+	EnableEncryption bool `json:"enableEncryption"`
 }
 
-type SubmitSensorTaskRequest struct {
+type SensorTaskRequest struct {
 	TaskId UUID `json:"id"`
 	SamplingParams
 	AuthorityIP IP `json:"authorityIP"`

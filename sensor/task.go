@@ -1,6 +1,7 @@
 package sensor
 
 import (
+	"encoding/json"
 	. "fe/common"
 	"sync"
 	"sync/atomic"
@@ -34,8 +35,8 @@ type Task struct {
 	logger *Logger
 }
 
-// NewTask creates a new Task from common.SubmitSensorTaskRequest
-func (sensor *Sensor) NewTask(taskRequest *SubmitSensorTaskRequest) *Task {
+// NewTask creates a new Task from common.SensorTaskRequest
+func (sensor *Sensor) NewTask(taskRequest *SensorTaskRequest) *Task {
 	task := &Task{
 		Id:       taskRequest.TaskId,
 		SensorId: sensor.Id,
@@ -62,10 +63,13 @@ func (sensor *Sensor) NewTask(taskRequest *SubmitSensorTaskRequest) *Task {
 	}
 
 	task.logger.Info("task created")
+	taskRequestJson, _ := json.MarshalIndent(taskRequest, "", "  ")
+	task.logger.Info("Task params: %s", string(taskRequestJson))
 	sensor.AddTask(task)
 	return task
 }
 
+// AddSample adds a new sample to the next incomplete batch. If the batch is full, submits it for encryption.
 func (t *Task) AddSample(sample int) {
 	t.addingSampleMutex.Lock()
 	defer t.addingSampleMutex.Unlock()
@@ -97,7 +101,7 @@ func (t *Task) EncryptBatch(batchIdx int) bool {
 	batch.encryptionTime = elapsedTime
 	t.encryptedBatchesCnt.Add(1)
 
-	t.logger.Info("encryption of batch no %d successful", batchIdx)
+	//t.logger.Info("encryption of batch no %d successful", batchIdx)
 	return true
 }
 
@@ -157,7 +161,7 @@ func (t *Task) FetchEncryptionParams() bool {
 		return false
 	}
 
-	t.encryptor = NewFEEncryptor(feEncryptionParams)
+	t.encryptor = NewFEEncryptor(feEncryptionParams, t.logger)
 	t.encryptionParamsFetched.Store(true)
 	return true
 }

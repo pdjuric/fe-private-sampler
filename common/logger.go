@@ -1,19 +1,19 @@
 package common
 
 import (
+	"fmt"
 	"github.com/sirupsen/logrus"
 	"io"
 	"os"
+	"strings"
 	"sync"
 )
-
-// todo close files with wgs!!!
 
 var loggerMap map[string]*logrus.Logger
 var loggerMapMutex sync.Mutex
 var loggingDir = ""
 
-// MUST BE CALLED BEFORE ANY LOGGING
+// InitLogger initializes the logger ; must be called before any logging
 func InitLogger(dir string) error {
 	loggerMap = make(map[string]*logrus.Logger)
 
@@ -25,8 +25,9 @@ func InitLogger(dir string) error {
 	if dir[len(dir)-1] != '/' {
 		dir += "/"
 	}
-	loggingDir = dir
+	loggingDir = "logs/" + dir
 	return nil
+	// todo close files
 }
 
 // logs dir must exist
@@ -48,21 +49,24 @@ func GetLoggerForFile(prefix string, filename string) *Logger {
 		dumbLogger.SetLevel(logrus.DebugLevel)
 		dumbLogger.SetOutput(logFile)
 		//httpLogger.SetReportCaller(true)
-		//httpLogger.SetFormatter(&logFormatter{})
+		dumbLogger.SetFormatter(&LogFormatter{
+			logrus.TextFormatter{
+				FullTimestamp:          true,
+				TimestampFormat:        "2006-01-02 15:04:05",
+				ForceColors:            true,
+				DisableLevelTruncation: true,
+			},
+		})
 		loggerMap[filename] = dumbLogger
 	}
 
-	if prefix != "" {
-		prefix = " [" + prefix + "] "
-	}
+	prefix = prefix + "$"
 
 	return &Logger{prefix, dumbLogger}
 }
 
 func GetLogger(prefix string, logger *Logger) *Logger {
-	if prefix != "" {
-		prefix = " [" + prefix + "] "
-	}
+	prefix = prefix + "$"
 	return &Logger{prefix, logger.dumbLogger}
 }
 
@@ -85,6 +89,23 @@ func (l *Logger) Error(format string, args ...interface{}) {
 	l.dumbLogger.Errorf(l.prefix+format, args...)
 }
 
+func (l *Logger) Debug(format string, args ...interface{}) {
+	l.dumbLogger.Debugf(l.prefix+format, args...)
+}
+
 func (l *Logger) Err(err error) {
 	l.dumbLogger.Error(l.prefix + err.Error())
+}
+
+type LogFormatter struct {
+	logrus.TextFormatter
+}
+
+func (f *LogFormatter) Format(entry *logrus.Entry) ([]byte, error) {
+	prefix := strings.Split(entry.Message, "$")[0]
+	message, _ := strings.CutPrefix(entry.Message, prefix+"$")
+	if len(prefix) > 0 {
+		prefix = "[" + prefix + "] "
+	}
+	return []byte(fmt.Sprintf("[%s] %s %s- %s\n", entry.Time.Format(f.TimestampFormat), strings.ToUpper(entry.Level.String()), prefix, message)), nil
 }

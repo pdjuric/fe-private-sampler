@@ -2,12 +2,11 @@ package sensor
 
 import (
 	. "fe/common"
-	"math/rand"
+	"sync/atomic"
 	"time"
 )
 
-// StartSampler starts sampler as Runnable goroutine, with samplingDetails, and returns function that stops the sampler
-//
+// StartSampler starts sampler as Runnable goroutine, with samplingDetails, and returns function that stops the sampler.
 // The caller is responsible for closing sampleChan
 func StartSampler(samplingDetails *SamplingParams, sampleChan *chan int, closeChannelFn func(), logger *Logger) (stopFn func()) {
 	samplerHandle := NewRunnable("sampler", logger)
@@ -16,7 +15,7 @@ func StartSampler(samplingDetails *SamplingParams, sampleChan *chan int, closeCh
 	return
 }
 
-// sampler reads the sensor with readSampleFromSensor and writes samples to sampleChan;
+// sampler reads the sensor with readSample and writes samples to sampleChan;
 // it reads sampling details (start, period, sampleCount, maxSampleValue) from samplingDetails;
 // it first resets the sensor at *start* time, then it samples the sensor every *period* seconds, *sampleCount* times
 func sampler(r *Runnable, samplingDetails *SamplingParams, sampleChan *chan int, closeChannelFn func()) {
@@ -25,6 +24,13 @@ func sampler(r *Runnable, samplingDetails *SamplingParams, sampleChan *chan int,
 	period := time.Duration(samplingDetails.SamplingPeriod) * time.Second
 	sampleCount := samplingDetails.BatchCnt * samplingDetails.BatchSize
 	maxSampleValue := samplingDetails.MaxSampleValue
+
+	hwSensor := NewRepeatedSequenceGenerator()
+	if !hardwareSensor.CompareAndSwap(nil, hwSensor) {
+		hwSensor = hardwareSensor.Load()
+	}
+
+	var idx int
 
 	r.Start()
 
@@ -35,7 +41,7 @@ func sampler(r *Runnable, samplingDetails *SamplingParams, sampleChan *chan int,
 	// todo if late?
 
 	r.Logger.Info("resetting sampler at %d", Now().Unix())
-	resetSensor()
+	hwSensor.Reset(&idx)
 
 	for {
 		select {
@@ -50,7 +56,7 @@ func sampler(r *Runnable, samplingDetails *SamplingParams, sampleChan *chan int,
 
 			// if server reading takes too long, time will be off -> time.After should be used in a separate goroutine
 			// it's ok here
-			*sampleChan <- readSampleFromSensor(maxSampleValue)
+			*sampleChan <- hwSensor.ReadSample(maxSampleValue, &idx)
 			r.Logger.Info("sampled at %d", Now().Unix())
 
 			sampleCount--
@@ -67,11 +73,4 @@ func sampler(r *Runnable, samplingDetails *SamplingParams, sampleChan *chan int,
 
 }
 
-// readSampleFromSensor mocks a hardware sensor, and returns random sample in [0, maxValue]
-func readSampleFromSensor(maxValue int) int {
-	return rand.Intn(maxValue)
-}
-
-// resetSensor does literally nothing
-func resetSensor() {
-}
+var hardwareSensor atomic.Pointer[RepeatedSequenceGenerator]

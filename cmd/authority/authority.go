@@ -16,7 +16,7 @@ func AuthorityMain() {
 	}
 
 	ip := IP{
-		Schema: "http",
+		Scheme: "http",
 		IPv4:   GetIPv4(),
 		Port:   "8082",
 	}
@@ -24,7 +24,7 @@ func AuthorityMain() {
 	GobInit()
 
 	authority := InitAuthority()
-	//authority.StartTaskDaemon(StartTaskWorker)
+	authority.StartTaskDaemon(StartTaskWorker)
 	authority.RunHttpServer(ip)
 }
 

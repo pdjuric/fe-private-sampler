@@ -2,6 +2,7 @@ package common
 
 import "fmt"
 
+// Host has a HttpServer for accepting requests and a taskDaemon for executing tasks.
 type Host[TaskT any] struct {
 	// TaskDaemon
 	taskChan          chan *TaskT // todo close
@@ -14,6 +15,8 @@ type Host[TaskT any] struct {
 	Logger *Logger
 }
 
+// InitHost initializes a new host by creating log file, setting up Task Daemon and registering endpoints
+// to the HttpServer.
 func InitHost[TaskT any](logDir string, logFilename string, taskDaemonChanSize int, endpoints []Endpoint) *Host[TaskT] {
 	err := InitLogger(logDir)
 	if err != nil {
@@ -37,7 +40,6 @@ func (h *Host[TaskT]) StartTaskDaemon(startTaskWorkerFn func(*TaskT)) {
 	go TaskDaemon(taskDaemonHandle, &h.taskChan, startTaskWorkerFn)
 }
 
-// todo how (where) do I use stateFn and stopFn
 func (h *Host[TaskT]) StopTaskDaemon() {
 	// todo
 	// todo where to close taskChan?

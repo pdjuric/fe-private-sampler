@@ -5,12 +5,11 @@ import (
 )
 
 type Endpoint struct {
-	Method   string
-	Path     string
-	Function func(c *gin.Context) (ResponseType, int, any)
+	Method  string
+	Path    string
+	Handler func(c *gin.Context) (ResponseType, int, any)
 }
 
-// todo what if machine is not online ????
 type HttpServer struct {
 	*IP
 	HttpLogger *Logger
@@ -25,7 +24,7 @@ func InitHttpServer(logger *Logger, endpoints []Endpoint) *HttpServer {
 	}
 }
 
-// RunHttpServer ; prior to call of this function, SetEndpoints must be called
+// todo what if machine is not online ????
 func (host *HttpServer) RunHttpServer(ip IP) {
 	if host.endpoints == nil {
 		host.HttpLogger.Error("endpoints not set")
@@ -45,6 +44,7 @@ func (host *HttpServer) RunHttpServer(ip IP) {
 			case JSONResponse:
 				c.JSON(code, body)
 			case DataResponse:
+				c.Header("Content-Type", string(DataResponse))
 				c.Data(code, "application/octet-stream", body.([]byte))
 			case NoResponse:
 				c.Status(code)
@@ -75,9 +75,9 @@ func (host *HttpServer) RunHttpServer(ip IP) {
 	for _, endpoint := range host.endpoints {
 		switch endpoint.Method {
 		case "POST":
-			router.POST(endpoint.Path, addLogging(endpoint.Function))
+			router.POST(endpoint.Path, addLogging(endpoint.Handler))
 		case "GET":
-			router.GET(endpoint.Path, addLogging(endpoint.Function))
+			router.GET(endpoint.Path, addLogging(endpoint.Handler))
 		}
 	}
 

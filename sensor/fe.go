@@ -15,8 +15,7 @@ type SingleFEEncryptor struct {
 	Schema        *fullysec.FHIPE
 	EncryptionKey *fullysec.FHIPESecKey
 
-	//EncryptedFlag     	atomic.Bool
-	//EncryptionTime		time.Duration
+	logger *Logger
 }
 
 type MultiFEEncryptor struct {
@@ -24,11 +23,15 @@ type MultiFEEncryptor struct {
 	IdxOffset     int
 	EncryptionKey []data.Matrix
 
-	//BatchEncryptedFlag     []atomic.Bool
-	//EncryptionTimes		 []time.Duration
+	logger *Logger
 }
 
-func NewFEEncryptor(feParams FEEncryptionParams) FEEncryptor {
+type DummyEncryptor struct {
+	IdxOffset int
+	logger    *Logger
+}
+
+func NewFEEncryptor(feParams FEEncryptionParams, logger *Logger) FEEncryptor {
 	switch feParams.(type) {
 
 	case *SingleFEEncryptionParams:
@@ -36,6 +39,7 @@ func NewFEEncryptor(feParams FEEncryptionParams) FEEncryptor {
 		return &SingleFEEncryptor{
 			Schema:        fullysec.NewFHIPEFromParams(params.SchemaParams),
 			EncryptionKey: params.SecKey,
+			logger:        GetLogger("fe encryptor", logger),
 		}
 
 	case *MultiFEEncryptionParams:
@@ -44,6 +48,14 @@ func NewFEEncryptor(feParams FEEncryptionParams) FEEncryptor {
 			Schema:        fullysec.NewFHMultiIPEFromParams(params.SchemaParams),
 			IdxOffset:     params.IdxOffset,
 			EncryptionKey: params.SecKeys,
+			logger:        GetLogger("fe encryptor", logger),
+		}
+
+	case *DummyEncryptionParams:
+		params := feParams.(*DummyEncryptionParams)
+		return &DummyEncryptor{
+			IdxOffset: params.IdxOffset,
+			logger:    GetLogger("fe encryptor", logger),
 		}
 
 	default:
@@ -58,12 +70,13 @@ func (e *SingleFEEncryptor) Encrypt(batch *Batch) (FECipher, time.Duration, erro
 	// encrypt + measure time
 	start := time.Now()
 	cipher, err := e.Schema.Encrypt(batch.samples, e.EncryptionKey)
-	encryptionTime := time.Since(start)
+	elapsed := time.Since(start)
+	e.logger.Info("batch no %d encryption time: %d ns", batch.idx, elapsed.Nanoseconds())
 	if err != nil {
-		return nil, encryptionTime, err
+		return nil, elapsed, err
 	}
 
-	return cipher, encryptionTime, nil
+	return cipher, elapsed, nil
 }
 
 func (e *MultiFEEncryptor) Encrypt(batch *Batch) (FECipher, time.Duration, error) {
@@ -72,13 +85,28 @@ func (e *MultiFEEncryptor) Encrypt(batch *Batch) (FECipher, time.Duration, error
 	// encrypt + measure time
 	start := time.Now()
 	cipher, err := e.Schema.Encrypt(batch.samples, e.EncryptionKey[batch.idx])
-	encryptionTime := time.Since(start)
+	elapsed := time.Since(start)
+	e.logger.Info("batch no %d encryption time: %d ns", batch.idx, elapsed.Nanoseconds())
 	if err != nil {
-		return nil, encryptionTime, err
+		return nil, elapsed, err
 	}
 
 	return &MultiFECipher{
 		Idx:     batch.idx + e.IdxOffset,
 		Payload: cipher,
-	}, encryptionTime, nil
+	}, elapsed, nil
+}
+
+func (e *DummyEncryptor) Encrypt(batch *Batch) (FECipher, time.Duration, error) {
+
+	// encrypt + measure time
+	start := time.Now()
+	cipher := DummyCipher{
+		Idx:     batch.idx + e.IdxOffset,
+		Samples: batch.samples,
+	}
+	elapsed := time.Since(start)
+	e.logger.Info("batch no %d encryption time: %d ns", batch.idx, elapsed.Nanoseconds())
+	return cipher, elapsed, nil
+
 }
